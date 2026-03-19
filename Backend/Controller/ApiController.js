@@ -1,99 +1,193 @@
+﻿const { GoogleGenAI } = require("@google/genai");
+
 if (!process.env.API_KEY) {
   process.exit(1);
 }
 
-const { GoogleGenAI } = require("@google/genai");
+const CODE_KEYWORDS = [
+  "function",
+  "const",
+  "let",
+  "var",
+  "if",
+  "for",
+  "while",
+  "class",
+  "import",
+  "export",
+  "return",
+  "async",
+  "await",
+  "try",
+  "catch",
+  "switch",
+  "case",
+  "=>",
+  "{}",
+  "()",
+  "[];",
+  "void",
+  "console.log",
+  "console.error",
+  "console.warn",
+  "document.",
+  "window.",
+  "alert(",
+  "Math.",
+  ".length",
+  ".push(",
+  ".map(",
+  ".filter(",
+  "getElementById",
+  "querySelector",
+  "addEventListener",
+  "setTimeout(",
+  "setInterval(",
+  "require(",
+  "module.exports",
+  "def ",
+  "print(",
+  "int ",
+  "string",
+  "public",
+  "void",
+  "System.out",
+  "<html",
+  "<div",
+  "<p",
+  "SELECT",
+  "FROM",
+  "#include",
+  "printf(",
+  "cout <<",
+  ":=",
+  "func ",
+  "fmt.Println",
+  "echo ",
+  "puts ",
+];
+
+const buildModeInstruction = (mode) => {
+  if (mode === "Refactor") {
+    return "Stay bug-fix first. Fix the real bug, then make only small readability improvements when they directly support the fix.";
+  }
+
+  if (mode === "ELI5") {
+    return "Explain the bug and the fix in very simple beginner-friendly language. Use analogies only when they help explain the root cause and the fix.";
+  }
+
+  if (mode === "Debug") {
+    return "Focus on identifying the real bug, its root cause, and the smallest safe fix.";
+  }
+
+  return "Analyze the code for bugs, root causes, and the safest fix.";
+};
+
+const buildPrompt = ({ code, language, mode }) => `
+You are a senior software engineer and debugging specialist.
+Current Mode: ${mode}
+${buildModeInstruction(mode)}
+
+Analyze the following ${language} code step by step.
+Your job is to help the user understand:
+1. What error or bug exists
+2. Why it happens
+3. How you fixed it
+4. Why the fix works
+5. How to avoid the same bug next time
+
+Rules:
+- Do not rename any functions
+- Do not change the overall logic unless the bug cannot be fixed without doing so
+- Always return valid runnable ${language} code
+- Prefer the smallest safe fix over a large rewrite
+- Add only brief comments when they help explain a non-obvious fix
+- Do NOT wrap the fixed code in markdown backticks
+- Do NOT add \`\`\`${language} or \`\`\` anywhere
+- Khmer explanation must be written in proper Khmer script (ភាសាខ្មែរ)
+- Khmer explanation must be natural and easy to understand for beginners
+- If the code has no real bug, say so clearly and return the original code with only minimal safe cleanup
+- If Mode is ELI5, make both English and Khmer explanations extra simple
+- Keep lists short and concrete
+- Do not add any section other than the required format
+
+Return in EXACTLY this format and nothing else:
+
+ERROR_SUMMARY:
+- brief English summary of the main error or bug
+
+ERROR_SUMMARY_KH:
+- same summary in Khmer
+
+ROOT_CAUSE:
+- brief English explanation of the real cause
+
+ROOT_CAUSE_KH:
+- same explanation in Khmer
+
+BUG_TYPE:
+- choose one or two only: syntax, logic, runtime, type, async, scope, null-undefined, api-misuse, data-flow, no-bug-found
+
+BUG_TYPE_KH:
+- same bug type in Khmer
+
+FIX_CONFIDENCE:
+- High, Medium, or Low
+
+FIX_CONFIDENCE_KH:
+- Khmer translation of the confidence level
+
+FIXED_CODE:
+// your fixed code here, no markdown, no backticks
+
+CHANGES_MADE:
+- list each important change in English
+
+CHANGES_MADE_KH:
+- same list in Khmer
+
+WHY_THIS_FIX_WORKS:
+// short English explanation of why the fix solves the bug
+
+WHY_THIS_FIX_WORKS_KH:
+// same explanation in Khmer
+
+ALTERNATIVE_FIXES:
+- optional alternative fix in English
+- if there is no useful alternative, write: None
+
+ALTERNATIVE_FIXES_KH:
+- same content in Khmer
+- if there is no useful alternative, write: None
+
+PREVENTION_TIPS:
+- short English tips to avoid this bug next time
+
+PREVENTION_TIPS_KH:
+- same tips in Khmer
+
+EXPLANATION_EN:
+// full English explanation covering what broke, why it broke, what changed, and why the fix works
+
+EXPLANATION_KH:
+// same explanation in Khmer script
+
+Code to analyze:
+${code}
+`;
 
 const viewResult = async (req, res) => {
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const { code, language, mode = "Debug" } = req.body;
 
-    // Validate required fields
     if (!code || !language) {
       return res.status(400).json({
         message: "Code and language are required",
       });
     }
 
-    // ✅ Validate that input is actually code
-    const codeKeywords = [
-      // JavaScript / TypeScript
-      "function",
-      "const",
-      "let",
-      "var",
-      "if",
-      "for",
-      "while",
-      "class",
-      "import",
-      "export",
-      "return",
-      "async",
-      "await",
-      "try",
-      "catch",
-      "switch",
-      "case",
-      "=>",
-      "{}",
-      "()",
-      "[];",
-      "void",
-      // Console & DOM
-      "console.log",
-      "console.error",
-      "console.warn",
-      "document.",
-      "window.",
-      "alert(",
-      // Array & Math methods
-      "Math.",
-      ".length",
-      ".push(",
-      ".map(",
-      ".filter(",
-      // DOM methods
-      "getElementById",
-      "querySelector",
-      "addEventListener",
-      // Timers & Node.js
-      "setTimeout(",
-      "setInterval(",
-      "require(",
-      "module.exports",
-      // Python
-      "def ",
-      "print(",
-      // Java / C#
-      "int ",
-      "string",
-      "public",
-      "void",
-      "System.out",
-      // HTML
-      "<html",
-      "<div",
-      "<p",
-      // SQL
-      "SELECT",
-      "FROM",
-      // C / C++
-      "#include",
-      "printf(",
-      "cout <<",
-      // Go
-      ":=",
-      "func ",
-      "fmt.Println",
-      // PHP
-      "echo ",
-      // Ruby
-      "puts ",
-    ];
-
-    const hasKeyword = codeKeywords.some((keyword) =>
+    const hasKeyword = CODE_KEYWORDS.some((keyword) =>
       code.toLowerCase().includes(keyword.toLowerCase()),
     );
     const hasMinLength = code.trim().length > 10;
@@ -106,7 +200,6 @@ const viewResult = async (req, res) => {
       });
     }
 
-    // ✅ Character limit check
     if (code.length > 5000) {
       return res.status(400).json({
         message:
@@ -114,82 +207,15 @@ const viewResult = async (req, res) => {
       });
     }
 
-    let modeInstruction = "";
-    if (mode === "Refactor") {
-      modeInstruction =
-        "Focus on making the code more efficient, readable, and modern. Even if there are no bugs, improve the architecture.";
-    } else if (mode === "Debug") {
-      modeInstruction =
-        "Focus on identifying and fixing bugs, errors, and logic flaws.";
-    } else {
-      modeInstruction = "Analyze the code for both bugs and improvements.";
-    }
-
-    const prompt = `
-      You are a senior software engineer and code review tool.
-      Current Mode: ${mode}
-      ${modeInstruction}
-
-      Analyze the following ${language} code step by step:
-
-      STEP 1 - IDENTIFY: List all bugs and errors found
-      STEP 2 - FIX: Return the complete fixed and refactored code
-      STEP 3 - COMMENT: Add brief comments above each function
-      STEP 4 - EXPLAIN: Plain English summary of every change
-      STEP 5 - TRANSLATE: Translate the explanation into Khmer language
-
-      Rules:
-      - Do not rename any functions
-      - Do not change the overall logic
-      - Always return valid runnable ${language} code
-      - Keep comments short and clear
-      - Do NOT wrap the fixed code in markdown backticks
-      - Do NOT add \`\`\`${language} or \`\`\` anywhere
-      - Khmer explanation must be written in proper Khmer script (ភាសាខ្មែរ)
-      - Khmer explanation must be natural and easy to understand for beginners
-
-      Return in EXACTLY this format and nothing else:
-
-      FIXED_CODE:
-      // your fixed code here, no markdown, no backticks
-
-      BUGS_FOUND:
-      // list each bug briefly in English
-
-      BUGS_FOUND_KH:
-      // list each bug briefly in Khmer script (ភាសាខ្មែរ)
-
-      FIXES_APPLIED:
-      // list each fix briefly in English
-
-      FIXES_APPLIED_KH:
-      // list each fix briefly in Khmer script (ភាសាខ្មែរ)
-
-      IMPROVEMENTS:
-      // list each improvement briefly in English
-
-      IMPROVEMENTS_KH:
-      // list each improvement briefly in Khmer script (ភាសាខ្មែរ)
-
-      EXPLANATION_EN:
-      // full plain English explanation here
-
-      EXPLANATION_KH:
-      // same explanation in Khmer script here
-
-      Code to analyze:
-      ${code}
-    `;
-
     const result = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      contents: [{ role: "user", parts: [{ text: buildPrompt({ code, language, mode }) }] }],
       config: {
         thinkingLevel: "low",
       },
     });
 
-    res.json({
+    return res.json({
       message: "Gemini response:",
       result: result.text,
     });

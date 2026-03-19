@@ -1,105 +1,65 @@
-# AI Debugger Project - Gemini Context
+# CodeFixAI - Advanced AI Debugger 🚀
 
-This document provides foundational context and instructions for the AI Debugger project.
-
-## Project Overview
-
-The **AI Debugger** is a full-stack application designed to help developers identify bugs, refactor code, and understand changes through AI-powered analysis. It leverages Google's Gemini AI to provide detailed feedback in both English and Khmer.
-
-### Key Technologies
-
-- **Frontend:**
-  - **Framework:** React 18 with TypeScript and Vite.
-  - **Styling:** Tailwind CSS with Shadcn UI components.
-  - **State Management:** Zustand.
-  - **Animations:** Framer Motion.
-  - **Routing:** React Router DOM.
-  - **Data Fetching:** Tanstack Query (configured, though direct `fetch` is used in `Index.tsx`).
-  - **Syntax Highlighting:** React Syntax Highlighter (Prism).
-- **Backend:**
-  - **Runtime:** Node.js with Express.
-  - **AI Integration:** `@google/genai` (Google Generative AI SDK).
-  - **Environment Management:** `dotenv`.
-  - **Middleware:** `cors` for cross-origin requests.
-
-### Architecture
-
-- **Client-Server Model:** The React frontend communicates with an Express backend via a REST API.
-- **AI-Driven Logic:** The core analysis logic resides in the backend (`Backend/Controller/ApiController.js`), which constructs complex prompts for the Gemini model (`gemini-3-flash-preview`).
-- **Structured Response:** The backend returns a specifically formatted string that the frontend parses into structured categories: Fixed Code, Bugs Found, Fixes Applied, Improvements, and Detailed Explanations (Bilingual: EN/KH).
+**CodeFixAI** is a professional-grade, full-stack application designed to help developers identify bugs, refactor code, and understand logic through AI-powered analysis. It features a deep integration with Google's Gemini AI to provide detailed feedback in both **English** and **Khmer**.
 
 ---
 
-## Building and Running
+## ✨ Advanced Features
+
+### 1. 📝 Professional Smart Editor
+*   **Monaco Engine:** Powered by the same engine as VS Code.
+*   **Syntax Highlighting:** Real-time coloring for 15+ programming languages.
+*   **Full-Screen Mode:** Expand the editor to a massive workspace for complex coding tasks.
+*   **Intelligence:** Includes line numbers, bracket matching, and smooth scrolling.
+
+### 2. 🔄 Side-by-Side Diff View
+*   **Visual Comparison:** Toggle a "Diff Mode" to see exactly what the AI changed.
+*   **Color Coded:** Additions are highlighted in green, while removals are shown in red with a strikethrough.
+*   **Modal Support:** Works in both the main dashboard and the Full Code View modal.
+
+### 3. 🕰️ Local History & Persistence
+*   **Recent Fixes:** Automatically saves your last 10 code analyses to your browser's local storage.
+*   **One-Click Restore:** Quickly jump back to a previous fix without re-analyzing.
+*   **Smart Management:** Delete individual history items or clear the entire history with a single click (includes safety confirmation).
+
+### 4. 🧠 Intelligent Modes (including ELI5)
+*   **Debug Mode:** Focuses on finding and fixing logic errors and syntax bugs.
+*   **Refactor Mode:** Improves code efficiency, readability, and modern architecture.
+*   **ELI5 Mode (Explain Like I'm Five):** Provides simplified explanations using analogies and non-technical language—perfect for beginners!
+
+### 5. 🔊 Bilingual Voice Explanation
+*   **Listen to Logic:** Built-in "Listen" buttons for all analysis cards.
+*   **Multi-Language:** Supports high-quality text-to-speech in both English and Khmer.
+*   **Granular Control:** Listen to specific sections (Bugs, Fixes, Improvements) or the entire summary.
+
+---
+
+## 🛠️ Technology Stack
+
+- **Frontend:** React 18, TypeScript, Vite, Tailwind CSS, Shadcn UI, Monaco Editor, Framer Motion.
+- **Backend:** Node.js, Express, Google Generative AI (@google/genai).
+- **AI Model:** Gemini 3 Flash Preview (Optimized for speed and high-thinking accuracy).
+
+---
+
+## 🚀 Getting Started
 
 ### Prerequisites
-
-- Node.js (v18+ recommended)
-- npm or bun
+- Node.js (v18+)
 - A Google Gemini API Key
 
 ### Backend Setup
-
-1. Navigate to the `Backend` directory:
-   ```bash
-   cd Backend
-   ```
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Create a `.env` file in the `Backend` folder:
-   ```env
-   API_KEY=your_gemini_api_key_here
-   ```
-4. Start the server in development mode:
-   ```bash
-   npm run dev
-   ```
-   The server will run at `http://localhost:3000`.
+1. `cd Backend`
+2. `npm install`
+3. Create `.env` file: `API_KEY=your_key_here`
+4. `npm run dev` (Runs on port 3000)
 
 ### Frontend Setup
-
-1. Navigate to the `Frontend` directory:
-   ```bash
-   cd Frontend
-   ```
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Start the development server:
-   ```bash
-   npm run dev
-   ```
-   The frontend will typically run at `http://localhost:5173`.
+1. `cd Frontend`
+2. `npm install`
+3. `npm run dev` (Runs on port 5173)
 
 ---
 
-## Development Conventions
-
-### Code Style
-
-- **TypeScript:** Use TypeScript for all frontend code to ensure type safety.
-- **Components:** Functional components with Hooks are preferred.
-- **UI Components:** Use and extend the existing Shadcn UI components located in `Frontend/src/components/ui`.
-- **Styling:** Use Tailwind CSS utility classes. Follow the "gradient-border-top" and "glow-violet" patterns for a consistent aesthetic.
-
-### AI Interaction Patterns
-
-- **Prompt Engineering:** Any changes to the AI analysis should be modified in `Backend/Controller/ApiController.js`. Ensure the `EXACTLY this format` instruction in the prompt is maintained to avoid breaking the frontend parser.
-- **Khmer Support:** When modifying prompts, ensure the requirement for Khmer (ភាសាខ្មែរ) output is preserved.
-
-### Testing
-
-- **Unit/Integration Tests:** Vitest is configured in the frontend. Run `npm run test` in the `Frontend` directory.
-- **End-to-End Tests:** Playwright is configured. Use `npx playwright test`.
-
----
-
-## Key Files Summary
-
-- `Backend/Controller/ApiController.js`: Main logic for Gemini AI integration and prompt construction.
-- `Frontend/src/pages/Index.tsx`: Main application entry point handling the analysis workflow.
-- `Frontend/src/components/ExplanationCards.tsx`: Logic for parsing the AI response and displaying bilingual cards.
-- `Frontend/src/components/CodeInputPanel.tsx` / `CodeOutputPanel.tsx`: Core UI panels for code interaction.
+## 🌍 Localization
+CodeFixAI is built with a strong focus on the Cambodian developer community, providing **100% proper Khmer script** (ភាសាខ្មែរ) for all AI explanations and UI elements.

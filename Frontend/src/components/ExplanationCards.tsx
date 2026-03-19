@@ -1,79 +1,121 @@
-import { useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Bug, CheckCircle, Zap, Languages } from "lucide-react";
+import {
+  AlertTriangle,
+  Languages,
+  Lightbulb,
+  ShieldCheck,
+  Square,
+  Volume2,
+  Wrench,
+} from "lucide-react";
 import { Card, CardHeader, CardContent, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 
 type Status = "idle" | "loading" | "success" | "error";
 type Language = "en" | "kh";
+type SpeakerId = "summary" | "rootCause" | "changes" | "prevention" | null;
+
+type SectionMap = Record<string, string>;
 
 interface ParsedExplanation {
-  bugsEn: string[];
-  bugsKh: string[];
-  fixesEn: string[];
-  fixesKh: string[];
-  improvementsEn: string[];
-  improvementsKh: string[];
+  errorSummaryEn: string[];
+  errorSummaryKh: string[];
+  rootCauseEn: string[];
+  rootCauseKh: string[];
+  bugTypeEn: string[];
+  bugTypeKh: string[];
+  confidenceEn: string;
+  confidenceKh: string;
+  changesEn: string[];
+  changesKh: string[];
+  whyItWorksEn: string;
+  whyItWorksKh: string;
+  alternativesEn: string[];
+  alternativesKh: string[];
+  preventionEn: string[];
+  preventionKh: string[];
   explanationEn: string;
   explanationKh: string;
 }
 
+const SECTION_HEADERS = [
+  "ERROR_SUMMARY",
+  "ERROR_SUMMARY_KH",
+  "ROOT_CAUSE",
+  "ROOT_CAUSE_KH",
+  "BUG_TYPE",
+  "BUG_TYPE_KH",
+  "FIX_CONFIDENCE",
+  "FIX_CONFIDENCE_KH",
+  "FIXED_CODE",
+  "CHANGES_MADE",
+  "CHANGES_MADE_KH",
+  "WHY_THIS_FIX_WORKS",
+  "WHY_THIS_FIX_WORKS_KH",
+  "ALTERNATIVE_FIXES",
+  "ALTERNATIVE_FIXES_KH",
+  "PREVENTION_TIPS",
+  "PREVENTION_TIPS_KH",
+  "EXPLANATION_EN",
+  "EXPLANATION_KH",
+] as const;
+
+const headerPattern = new RegExp(`(${SECTION_HEADERS.join("|")}):`, "gi");
+
+function parseSections(text: string): SectionMap {
+  const sections: SectionMap = {};
+  const matches = [...text.matchAll(headerPattern)];
+
+  matches.forEach((match, index) => {
+    const key = match[1].toUpperCase();
+    const start = (match.index ?? 0) + match[0].length;
+    const end = index + 1 < matches.length ? matches[index + 1].index ?? text.length : text.length;
+    sections[key] = text.slice(start, end).trim();
+  });
+
+  return sections;
+}
+
+function toList(content?: string): string[] {
+  if (!content) return [];
+
+  return content
+    .split("\n")
+    .map((line) => line.replace(/^[-*•]\s*/, "").trim())
+    .filter(Boolean)
+    .filter((line) => line.toLowerCase() !== "none");
+}
+
+function cleanText(content?: string): string {
+  return content?.trim() || "";
+}
+
 function parseExplanation(text: string): ParsedExplanation {
-  const sections = text.split(
-    /(BUGS_FOUND:|BUGS_FOUND_KH:|FIXES_APPLIED:|FIXES_APPLIED_KH:|IMPROVEMENTS:|IMPROVEMENTS_KH:|EXPLANATION_EN:|EXPLANATION_KH:)/,
-  );
+  const sections = parseSections(text);
 
-  const result: ParsedExplanation = {
-    bugsEn: [],
-    bugsKh: [],
-    fixesEn: [],
-    fixesKh: [],
-    improvementsEn: [],
-    improvementsKh: [],
-    explanationEn: "",
-    explanationKh: "",
+  return {
+    errorSummaryEn: toList(sections.ERROR_SUMMARY),
+    errorSummaryKh: toList(sections.ERROR_SUMMARY_KH),
+    rootCauseEn: toList(sections.ROOT_CAUSE),
+    rootCauseKh: toList(sections.ROOT_CAUSE_KH),
+    bugTypeEn: toList(sections.BUG_TYPE),
+    bugTypeKh: toList(sections.BUG_TYPE_KH),
+    confidenceEn: cleanText(sections.FIX_CONFIDENCE),
+    confidenceKh: cleanText(sections.FIX_CONFIDENCE_KH),
+    changesEn: toList(sections.CHANGES_MADE),
+    changesKh: toList(sections.CHANGES_MADE_KH),
+    whyItWorksEn: cleanText(sections.WHY_THIS_FIX_WORKS),
+    whyItWorksKh: cleanText(sections.WHY_THIS_FIX_WORKS_KH),
+    alternativesEn: toList(sections.ALTERNATIVE_FIXES),
+    alternativesKh: toList(sections.ALTERNATIVE_FIXES_KH),
+    preventionEn: toList(sections.PREVENTION_TIPS),
+    preventionKh: toList(sections.PREVENTION_TIPS_KH),
+    explanationEn: cleanText(sections.EXPLANATION_EN) || text,
+    explanationKh: cleanText(sections.EXPLANATION_KH),
   };
-
-  const splitLines = (content: string) =>
-    content
-      .split("\n")
-      .map((l) => l.replace(/^- /, "").trim())
-      .filter(Boolean);
-
-  for (let i = 1; i < sections.length; i += 2) {
-    const header = sections[i];
-    const content = sections[i + 1] ? sections[i + 1].trim() : "";
-
-    switch (header) {
-      case "BUGS_FOUND:":
-        result.bugsEn = splitLines(content);
-        break;
-      case "BUGS_FOUND_KH:":
-        result.bugsKh = splitLines(content);
-        break;
-      case "FIXES_APPLIED:":
-        result.fixesEn = splitLines(content);
-        break;
-      case "FIXES_APPLIED_KH:":
-        result.fixesKh = splitLines(content);
-        break;
-      case "IMPROVEMENTS:":
-        result.improvementsEn = splitLines(content);
-        break;
-      case "IMPROVEMENTS_KH:":
-        result.improvementsKh = splitLines(content);
-        break;
-      case "EXPLANATION_EN:":
-        result.explanationEn = content;
-        break;
-      case "EXPLANATION_KH:":
-        result.explanationKh = content;
-        break;
-    }
-  }
-
-  return result;
 }
 
 const fadeIn = {
@@ -86,6 +128,82 @@ const fadeIn = {
   },
 };
 
+interface SectionCardProps {
+  title: string;
+  items: string[];
+  textToSpeak: string;
+  lang: Language;
+  accentClass: string;
+  accentBgClass: string;
+  icon: typeof AlertTriangle;
+  speakerId: SpeakerId;
+  activeSpeaker: SpeakerId;
+  onSpeak: (text: string, language: Language, id: SpeakerId) => void;
+  status: Status;
+}
+
+function SectionCard({
+  title,
+  items,
+  textToSpeak,
+  lang,
+  accentClass,
+  accentBgClass,
+  icon: Icon,
+  speakerId,
+  activeSpeaker,
+  onSpeak,
+  status,
+}: SectionCardProps) {
+  return (
+    <Card className="transition-all hover:shadow-md border-primary/5 bg-secondary/5">
+      <CardHeader className="pb-3 flex flex-row items-center justify-between space-y-0">
+        <div className="flex items-center gap-2">
+          <div className={`flex h-7 w-7 items-center justify-center rounded-md ${accentBgClass}`}>
+            <Icon className={`h-3.5 w-3.5 ${accentClass}`} />
+          </div>
+          <CardTitle className={`text-sm font-semibold ${lang === "kh" ? "font-khmer" : ""}`}>
+            {title}
+          </CardTitle>
+        </div>
+        {status === "success" && textToSpeak && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className={`h-6 w-6 transition-colors ${activeSpeaker === speakerId ? "text-primary" : "text-muted-foreground hover:text-primary"}`}
+            onClick={() => onSpeak(textToSpeak, lang, speakerId)}
+          >
+            {activeSpeaker === speakerId ? <Square className="h-3 w-3 fill-current" /> : <Volume2 className="h-3.5 w-3.5" />}
+          </Button>
+        )}
+      </CardHeader>
+      <CardContent>
+        {status === "loading" ? (
+          <div className="space-y-2">
+            <Skeleton className="h-3 w-full bg-secondary" />
+            <Skeleton className="h-3 w-2/3 bg-secondary" />
+          </div>
+        ) : status === "success" ? (
+          <ul className="space-y-1.5">
+            {items.length > 0 ? (
+              items.map((item, index) => (
+                <li key={`${speakerId}-${index}`} className={`text-sm text-muted-foreground flex gap-2 ${lang === "kh" ? "font-khmer" : ""}`}>
+                  <span className={`shrink-0 mt-1.5 h-1 w-1 rounded-full ${accentClass.replace("text-", "bg-")}`} />
+                  {item}
+                </li>
+              ))
+            ) : (
+              <li className="text-sm text-muted-foreground/40 italic">None</li>
+            )}
+          </ul>
+        ) : (
+          <p className="text-xs text-muted-foreground/50 italic">Awaiting analysis...</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 interface Props {
   status: Status;
   explanation: string;
@@ -93,135 +211,264 @@ interface Props {
 
 export default function ExplanationCards({ status, explanation }: Props) {
   const [lang, setLang] = useState<Language>("en");
-  const parsed = status === "success" ? parseExplanation(explanation) : null;
+  const [activeSpeaker, setActiveSpeaker] = useState<SpeakerId>(null);
 
-  const cards = [
-    {
-      title: lang === "en" ? "Bugs Found" : "បញ្ហាដែលបានរកឃើញ",
-      icon: Bug,
-      accent: "text-destructive",
-      accentBg: "bg-destructive/10",
-      items: lang === "en" ? parsed?.bugsEn : parsed?.bugsKh,
-    },
-    {
-      title: lang === "en" ? "Fixes Applied" : "ការកែសម្រួលដែលបានធ្វើ",
-      icon: CheckCircle,
-      accent: "text-success",
-      accentBg: "bg-success/10",
-      items: lang === "en" ? parsed?.fixesEn : parsed?.fixesKh,
-    },
-    {
-      title: lang === "en" ? "Improvements" : "ការកែលម្អបន្ថែម",
-      icon: Zap,
-      accent: "text-primary",
-      accentBg: "bg-primary/10",
-      items: lang === "en" ? parsed?.improvementsEn : parsed?.improvementsKh,
-    },
-  ];
+  const parsed = useMemo(
+    () => (status === "success" ? parseExplanation(explanation) : null),
+    [status, explanation],
+  );
+
+  useEffect(() => {
+    return () => {
+      window.speechSynthesis.cancel();
+    };
+  }, []);
+
+  const handleSpeak = (text: string, language: Language, id: SpeakerId) => {
+    if (!text) return;
+
+    if (activeSpeaker === id) {
+      window.speechSynthesis.cancel();
+      setActiveSpeaker(null);
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    const voices = window.speechSynthesis.getVoices();
+
+    if (language === "kh") {
+      utterance.lang = "km-KH";
+      const khmerVoice = voices.find(
+        (voice) =>
+          voice.lang.toLowerCase().startsWith("km") ||
+          voice.name.toLowerCase().includes("khmer") ||
+          voice.lang.toLowerCase().includes("kh"),
+      );
+      if (khmerVoice) utterance.voice = khmerVoice;
+    } else {
+      utterance.lang = "en-US";
+      const englishVoice = voices.find(
+        (voice) => voice.lang.includes("en-US") || voice.lang.includes("en-GB"),
+      );
+      if (englishVoice) utterance.voice = englishVoice;
+    }
+
+    utterance.rate = 0.85;
+    utterance.onstart = () => setActiveSpeaker(id);
+    utterance.onend = () => setActiveSpeaker(null);
+    utterance.onerror = () => setActiveSpeaker(null);
+
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const cards = parsed
+    ? [
+        {
+          speakerId: "summary" as SpeakerId,
+          title: lang === "en" ? "Error Summary" : "សេចក្តីសង្ខេបបញ្ហា",
+          icon: AlertTriangle,
+          accentClass: "text-destructive",
+          accentBgClass: "bg-destructive/10",
+          items: lang === "en" ? parsed.errorSummaryEn : parsed.errorSummaryKh,
+          textToSpeak: (lang === "en" ? parsed.errorSummaryEn : parsed.errorSummaryKh).join(". "),
+        },
+        {
+          speakerId: "rootCause" as SpeakerId,
+          title: lang === "en" ? "Root Cause" : "មូលហេតុពិត",
+          icon: Lightbulb,
+          accentClass: "text-amber-500",
+          accentBgClass: "bg-amber-500/10",
+          items: lang === "en" ? parsed.rootCauseEn : parsed.rootCauseKh,
+          textToSpeak: (lang === "en" ? parsed.rootCauseEn : parsed.rootCauseKh).join(". "),
+        },
+        {
+          speakerId: "changes" as SpeakerId,
+          title: lang === "en" ? "Changes Made" : "ការកែប្រែដែលបានធ្វើ",
+          icon: Wrench,
+          accentClass: "text-success",
+          accentBgClass: "bg-success/10",
+          items: lang === "en" ? parsed.changesEn : parsed.changesKh,
+          textToSpeak: (lang === "en" ? parsed.changesEn : parsed.changesKh).join(". "),
+        },
+        {
+          speakerId: "prevention" as SpeakerId,
+          title: lang === "en" ? "Prevention Tips" : "គន្លឹះការពារ",
+          icon: ShieldCheck,
+          accentClass: "text-primary",
+          accentBgClass: "bg-primary/10",
+          items: lang === "en" ? parsed.preventionEn : parsed.preventionKh,
+          textToSpeak: (lang === "en" ? parsed.preventionEn : parsed.preventionKh).join(". "),
+        },
+      ]
+    : [];
+
+  const bugType = parsed ? (lang === "en" ? parsed.bugTypeEn : parsed.bugTypeKh) : [];
+  const confidence = parsed ? (lang === "en" ? parsed.confidenceEn : parsed.confidenceKh) : "";
+  const whyItWorks = parsed ? (lang === "en" ? parsed.whyItWorksEn : parsed.whyItWorksKh) : "";
+  const alternatives = parsed ? (lang === "en" ? parsed.alternativesEn : parsed.alternativesKh) : [];
+  const explanationText = parsed ? (lang === "en" ? parsed.explanationEn : parsed.explanationKh) : "";
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between px-1">
+      <div className="flex items-center justify-between px-1 gap-4 flex-wrap">
         <div className="flex items-center gap-2 text-muted-foreground">
           <Languages className="h-4 w-4" />
-          <span className="text-sm font-medium uppercase tracking-wider">
-            Analysis Results
-          </span>
+          <span className="text-sm font-medium uppercase tracking-wider">Debug Analysis</span>
         </div>
-        <div className="flex bg-secondary/50 p-1 rounded-lg border border-border/50">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setLang("en")}
-            className={`h-8 px-3 text-sm font-bold rounded-md transition-all ${lang === "en" ? "bg-background text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-          >
-            ENGLISH
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setLang("kh")}
-            className={`h-7 px-3 text-sm font-bold rounded-md transition-all font-khmer ${lang === "kh" ? "bg-background text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-          >
-            ភាសាខ្មែរ
-          </Button>
+        <div className="flex items-center gap-3 flex-wrap">
+          {status === "success" && bugType.length > 0 && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                {lang === "en" ? "Bug Type" : "ប្រភេទបញ្ហា"}
+              </span>
+              {bugType.map((item, index) => (
+                <Badge key={`${item}-${index}`} variant="outline" className="border-primary/20 bg-secondary/40">
+                  {item}
+                </Badge>
+              ))}
+            </div>
+          )}
+          {status === "success" && confidence && (
+            <Badge className="bg-primary/10 text-primary border border-primary/20 hover:bg-primary/10">
+              {(lang === "en" ? "Confidence: " : "កម្រិតទំនុកចិត្ត: ") + confidence.replace(/^[-*•]\s*/, "")}
+            </Badge>
+          )}
+          <div className="flex bg-secondary/50 p-1 rounded-lg border border-border/50">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setLang("en")}
+              className={`h-8 px-4 text-xs font-bold rounded-md transition-all ${lang === "en" ? "bg-background text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              ENGLISH
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setLang("kh")}
+              className={`h-8 px-4 text-xs font-bold rounded-md transition-all font-khmer ${lang === "kh" ? "bg-background text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              ភាសាខ្មែរ
+            </Button>
+          </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         {cards.map((card) => (
-          <Card
+          <SectionCard
             key={card.title}
-            className="transition-transform duration-200 hover:-translate-y-0.5"
-          >
-            <CardHeader className="pb-3">
-              <div className="flex items-center gap-2">
-                <div
-                  className={`flex h-7 w-7 items-center justify-center rounded-md ${card.accentBg}`}
-                >
-                  <card.icon className={`h-3.5 w-3.5 ${card.accent}`} />
-                </div>
-                <CardTitle
-                  className={`text-base font-semibold ${lang === "kh" ? "font-khmer leading-relaxed" : ""}`}
-                >
-                  {card.title}
-                </CardTitle>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {status === "loading" ? (
-                <div className="space-y-2">
-                  <Skeleton className="h-3 w-[80%] bg-secondary" />
-                  <Skeleton className="h-3 w-[60%] bg-secondary" />
-                </div>
-              ) : status === "success" ? (
-                <AnimatePresence mode="wait">
-                  <motion.ul key={lang} {...fadeIn} className="space-y-1.5">
-                    {card.items?.map((item, i) => (
-                      <li
-                        key={i}
-                        className={`text-base leading-relaxed text-muted-foreground ${lang === "kh" ? "font-khmer" : ""}`}
-                      >
-                        <span className={`mr-1.5 ${card.accent}`}>•</span>
-                        {item}
-                      </li>
-                    ))}
-                    {(!card.items || card.items.length === 0) && (
-                      <li className="text-base text-muted-foreground/50">
-                        None detected
-                      </li>
-                    )}
-                  </motion.ul>
-                </AnimatePresence>
-              ) : (
-                <p className="text-sm text-muted-foreground/50">
-                  Awaiting analysis...
-                </p>
-              )}
-            </CardContent>
-          </Card>
+            title={card.title}
+            items={card.items}
+            textToSpeak={card.textToSpeak}
+            lang={lang}
+            accentClass={card.accentClass}
+            accentBgClass={card.accentBgClass}
+            icon={card.icon}
+            speakerId={card.speakerId}
+            activeSpeaker={activeSpeaker}
+            onSpeak={handleSpeak}
+            status={status}
+          />
         ))}
       </div>
 
-      {status === "success" && (
-        <Card className="transition-transform duration-200 hover:-translate-y-0.5">
-          <CardHeader className="pb-3 border-b border-border/50">
-            <CardTitle
-              className={`text-sm ${lang === "kh" ? "font-khmer leading-relaxed" : ""}`}
-            >
-              {lang === "en"
-                ? "Summary Explanation"
-                : "សេចក្តីសង្ខេបនៃការកែសម្រួល"}
+      {status === "success" && parsed && (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <Card className="border-primary/10 bg-secondary/10 overflow-hidden shadow-lg">
+            <CardHeader className="pb-3 border-b border-border/50 bg-secondary/20 flex flex-row items-center justify-between space-y-0">
+              <CardTitle className={`text-xs font-bold uppercase tracking-widest text-primary ${lang === "kh" ? "font-khmer" : ""}`}>
+                {lang === "en" ? "Why This Fix Works" : "ហេតុអ្វីការកែនេះដំណើរការ"}
+              </CardTitle>
+              <Button
+                variant="outline"
+                size="sm"
+                className={`h-8 gap-2 border-primary/20 ${activeSpeaker === "summary" ? "bg-primary/10 text-primary" : "bg-background"}`}
+                onClick={() => handleSpeak(whyItWorks, lang, "summary")}
+                disabled={!whyItWorks}
+              >
+                {activeSpeaker === "summary" ? (
+                  <>
+                    <Square className="h-3.5 w-3.5 fill-current" /> Stop
+                  </>
+                ) : (
+                  <>
+                    <Volume2 className="h-3.5 w-3.5" /> Listen
+                  </>
+                )}
+              </Button>
+            </CardHeader>
+            <CardContent className="pt-6">
+              <motion.div
+                key={`why-${lang}`}
+                {...fadeIn}
+                className={`text-base leading-relaxed p-4 rounded-lg bg-background/50 border border-primary/5 ${lang === "kh" ? "font-khmer text-lg leading-loose" : "text-foreground/80"}`}
+              >
+                {whyItWorks || (lang === "en" ? "No explanation returned." : "មិនមានការពន្យល់ត្រូវបានបង្ហាញទេ។")}
+              </motion.div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-primary/10 bg-secondary/10 overflow-hidden shadow-lg">
+            <CardHeader className="pb-3 border-b border-border/50 bg-secondary/20">
+              <CardTitle className={`text-xs font-bold uppercase tracking-widest text-primary ${lang === "kh" ? "font-khmer" : ""}`}>
+                {lang === "en" ? "Alternative Fixes" : "វិធីកែផ្សេងទៀត"}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-6">
+              <ul className="space-y-2 p-4 rounded-lg bg-background/50 border border-primary/5">
+                {alternatives.length > 0 ? (
+                  alternatives.map((item, index) => (
+                    <li key={`alternative-${index}`} className={`text-sm text-muted-foreground flex gap-2 ${lang === "kh" ? "font-khmer" : ""}`}>
+                      <span className="shrink-0 mt-1.5 h-1 w-1 rounded-full bg-primary" />
+                      {item}
+                    </li>
+                  ))
+                ) : (
+                  <li className="text-sm text-muted-foreground/40 italic">
+                    {lang === "en" ? "No alternative fix returned." : "មិនមានវិធីកែផ្សេងទៀតត្រូវបានបង្ហាញទេ។"}
+                  </li>
+                )}
+              </ul>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {status === "success" && parsed && (
+        <Card className="border-primary/10 bg-secondary/10 overflow-hidden shadow-lg">
+          <CardHeader className="pb-3 border-b border-border/50 bg-secondary/20 flex flex-row items-center justify-between space-y-0">
+            <CardTitle className={`text-xs font-bold uppercase tracking-widest text-primary ${lang === "kh" ? "font-khmer" : ""}`}>
+              {lang === "en" ? "Full Debug Explanation" : "ការពន្យល់លម្អិតអំពីការកែកំហុស"}
             </CardTitle>
+            <Button
+              variant="outline"
+              size="sm"
+              className={`h-8 gap-2 border-primary/20 ${activeSpeaker === "rootCause" ? "bg-primary/10 text-primary" : "bg-background"}`}
+              onClick={() => handleSpeak(explanationText, lang, "rootCause")}
+              disabled={!explanationText}
+            >
+              {activeSpeaker === "rootCause" ? (
+                <>
+                  <Square className="h-3.5 w-3.5 fill-current" /> Stop
+                </>
+              ) : (
+                <>
+                  <Volume2 className="h-3.5 w-3.5" /> Listen
+                </>
+              )}
+            </Button>
           </CardHeader>
-          <CardContent className="pt-4">
+          <CardContent className="pt-6">
             <AnimatePresence mode="wait">
               <motion.div
                 key={lang}
                 {...fadeIn}
-                className={`text-base leading-relaxed ${lang === "kh" ? "font-khmer" : ""}`}
+                className={`text-base leading-relaxed p-4 rounded-lg bg-background/50 border border-primary/5 ${lang === "kh" ? "font-khmer text-lg leading-loose" : "text-foreground/80"}`}
               >
-                {lang === "en" ? parsed?.explanationEn : parsed?.explanationKh}
+                {explanationText || (lang === "en" ? "No detailed explanation returned." : "មិនមានការពន្យល់លម្អិតត្រូវបានបង្ហាញទេ។")}
               </motion.div>
             </AnimatePresence>
           </CardContent>
