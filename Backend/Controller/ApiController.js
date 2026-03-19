@@ -1,8 +1,4 @@
 if (!process.env.API_KEY) {
-  console.error("CRITICAL ERROR: API_KEY is missing in Backend/.env file.");
-  console.log(
-    "Please create a .env file in the Backend folder and add: API_KEY=your_key_here",
-  );
   process.exit(1);
 }
 
@@ -10,13 +6,111 @@ const { GoogleGenAI } = require("@google/genai");
 
 const viewResult = async (req, res) => {
   try {
-    // 2. The new SDK uses an object for config: { apiKey: '...' }
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const { code, language, mode = "Debug" } = req.body;
 
+    // Validate required fields
     if (!code || !language) {
       return res.status(400).json({
         message: "Code and language are required",
+      });
+    }
+
+    // ✅ Validate that input is actually code
+    const codeKeywords = [
+      // JavaScript / TypeScript
+      "function",
+      "const",
+      "let",
+      "var",
+      "if",
+      "for",
+      "while",
+      "class",
+      "import",
+      "export",
+      "return",
+      "async",
+      "await",
+      "try",
+      "catch",
+      "switch",
+      "case",
+      "=>",
+      "{}",
+      "()",
+      "[];",
+      "void",
+      // Console & DOM
+      "console.log",
+      "console.error",
+      "console.warn",
+      "document.",
+      "window.",
+      "alert(",
+      // Array & Math methods
+      "Math.",
+      ".length",
+      ".push(",
+      ".map(",
+      ".filter(",
+      // DOM methods
+      "getElementById",
+      "querySelector",
+      "addEventListener",
+      // Timers & Node.js
+      "setTimeout(",
+      "setInterval(",
+      "require(",
+      "module.exports",
+      // Python
+      "def ",
+      "print(",
+      // Java / C#
+      "int ",
+      "string",
+      "public",
+      "void",
+      "System.out",
+      // HTML
+      "<html",
+      "<div",
+      "<p",
+      // SQL
+      "SELECT",
+      "FROM",
+      // C / C++
+      "#include",
+      "printf(",
+      "cout <<",
+      // Go
+      ":=",
+      "func ",
+      "fmt.Println",
+      // PHP
+      "echo ",
+      // Ruby
+      "puts ",
+    ];
+
+    const hasKeyword = codeKeywords.some((keyword) =>
+      code.toLowerCase().includes(keyword.toLowerCase()),
+    );
+    const hasMinLength = code.trim().length > 10;
+    const hasCodeSymbol = /[{}();=<>]/.test(code);
+
+    if (!hasKeyword && !(hasMinLength && hasCodeSymbol)) {
+      return res.status(400).json({
+        message:
+          "Please paste a valid code snippet. This tool only analyzes code.",
+      });
+    }
+
+    // ✅ Character limit check
+    if (code.length > 5000) {
+      return res.status(400).json({
+        message:
+          "Code is too long. Please paste a smaller snippet (max 5000 characters).",
       });
     }
 
@@ -87,9 +181,7 @@ const viewResult = async (req, res) => {
       ${code}
     `;
 
-    // 3. New SDK method: ai.models.generateContent
     const result = await ai.models.generateContent({
-      // Use the verified model ID below:
       model: "gemini-3-flash-preview",
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       config: {
@@ -97,10 +189,9 @@ const viewResult = async (req, res) => {
       },
     });
 
-    // 4. Access the text directly from the result
     res.json({
       message: "Gemini response:",
-      result: result.text, // The new SDK puts text directly on the result object
+      result: result.text,
     });
   } catch (error) {
     return res.status(500).json({

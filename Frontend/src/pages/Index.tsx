@@ -46,7 +46,7 @@ export default function Index() {
     setExplanation("");
 
     try {
-      const response = await fetch("http://127.0.0.1:3000/api", {
+      const response = await fetch("https://ai-debugger-project-backend.onrender.com/api", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
