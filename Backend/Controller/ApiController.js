@@ -1,4 +1,8 @@
 if (!process.env.API_KEY) {
+  console.error("CRITICAL ERROR: API_KEY is missing in Backend/.env file.");
+  console.log(
+    "Please create a .env file in the Backend folder and add: API_KEY=your_key_here",
+  );
   process.exit(1);
 }
 
@@ -8,7 +12,7 @@ const viewResult = async (req, res) => {
   try {
     // 2. The new SDK uses an object for config: { apiKey: '...' }
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    const { code, language } = req.body;
+    const { code, language, mode = "Debug" } = req.body;
 
     if (!code || !language) {
       return res.status(400).json({
@@ -16,10 +20,21 @@ const viewResult = async (req, res) => {
       });
     }
 
+    let modeInstruction = "";
+    if (mode === "Refactor") {
+      modeInstruction =
+        "Focus on making the code more efficient, readable, and modern. Even if there are no bugs, improve the architecture.";
+    } else if (mode === "Debug") {
+      modeInstruction =
+        "Focus on identifying and fixing bugs, errors, and logic flaws.";
+    } else {
+      modeInstruction = "Analyze the code for both bugs and improvements.";
+    }
+
     const prompt = `
       You are a senior software engineer and code review tool.
-      You ONLY analyze and fix code. If the input is not code, 
-      reply with: "Please paste a valid code snippet."
+      Current Mode: ${mode}
+      ${modeInstruction}
 
       Analyze the following ${language} code step by step:
 
@@ -34,38 +49,43 @@ const viewResult = async (req, res) => {
       - Do not change the overall logic
       - Always return valid runnable ${language} code
       - Keep comments short and clear
+      - Do NOT wrap the fixed code in markdown backticks
+      - Do NOT add \`\`\`${language} or \`\`\` anywhere
       - Khmer explanation must be written in proper Khmer script (ភាសាខ្មែរ)
       - Khmer explanation must be natural and easy to understand for beginners
 
       Return in EXACTLY this format and nothing else:
 
       FIXED_CODE:
-      \`\`\`${language}
-      // fixed code here
-      \`\`\`
+      // your fixed code here, no markdown, no backticks
 
       BUGS_FOUND:
-      // list each bug briefly
+      // list each bug briefly in English
+
+      BUGS_FOUND_KH:
+      // list each bug briefly in Khmer script (ភាសាខ្មែរ)
 
       FIXES_APPLIED:
-      // list each fix briefly
+      // list each fix briefly in English
+
+      FIXES_APPLIED_KH:
+      // list each fix briefly in Khmer script (ភាសាខ្មែរ)
 
       IMPROVEMENTS:
-      // list each improvement briefly
+      // list each improvement briefly in English
+
+      IMPROVEMENTS_KH:
+      // list each improvement briefly in Khmer script (ភាសាខ្មែរ)
 
       EXPLANATION_EN:
       // full plain English explanation here
-      // explain every change made in simple words
-      // beginner friendly language
 
       EXPLANATION_KH:
       // same explanation in Khmer script here
-      // ពន្យល់រាល់ការផ្លាស់ប្តូរជាភាសាខ្មែរ
-      // សរសេរឱ្យងាយស្រួលយល់សម្រាប់អ្នកចាប់ផ្តើមថ្មី
 
       Code to analyze:
       ${code}
-      `;
+    `;
 
     // 3. New SDK method: ai.models.generateContent
     const result = await ai.models.generateContent({
