@@ -51,21 +51,205 @@ const LANG_LABELS: Record<string, string> = {
   css: "CSS",
 };
 
+const LANGUAGE_PATTERNS: Partial<Record<keyof typeof LANG_LABELS, RegExp[]>> = {
+  javascript: [
+    /\b(const|let|var)\b/,
+    /\bconsole\.(log|error|warn)\s*\(/,
+    /\bfunction\b/,
+    /=>/,
+    /\bexport\s+default\b/,
+    /\bfrom\s+["']react["']/,
+    /\buse(State|Effect|Memo|Ref|Callback)\s*\(/,
+    /<([A-Z][A-Za-z0-9]*|div|span|button|input|section|main|header|footer)\b/,
+  ],
+  typescript: [
+    /\binterface\s+\w+/,
+    /\btype\s+\w+\s*=/,
+    /:\s*(string|number|boolean|any|unknown|void)\b/,
+    /\bimplements\b/,
+    /\bexport\s+default\b/,
+    /\bReact\.(FC|Node|Element)\b/,
+    /\buse(State|Effect|Memo|Ref)\s*</,
+    /<([A-Z][A-Za-z0-9]*|div|span|button|input|section|main|header|footer)\b/,
+  ],
+  python: [
+    /^\s*def\s+\w+\s*\(/m,
+    /^\s*import\s+\w+/m,
+    /\bprint\s*\(/,
+    /^\s*if\s+.+:\s*$/m,
+  ],
+  java: [
+    /\bpublic\s+class\b/,
+    /\bSystem\.out\.println\s*\(/,
+    /\bpublic\s+static\s+void\s+main\b/,
+    /\bprivate\s+\w+/,
+  ],
+  csharp: [
+    /\busing\s+System\b/,
+    /\bConsole\.Write(Line)?\s*\(/,
+    /\bnamespace\b/,
+    /\bpublic\s+class\b/,
+  ],
+  php: [
+    /<\?php/,
+    /\$\w+/,
+    /\becho\s+/,
+    /\bfunction\s+\w+\s*\(/,
+  ],
+  go: [
+    /\bpackage\s+main\b/,
+    /\bfunc\s+\w+\s*\(/,
+    /\bfmt\.Print(ln)?\s*\(/,
+    /:=/,
+  ],
+  swift: [
+    /\bimport\s+SwiftUI\b/,
+    /\bfunc\s+\w+\s*\(/,
+    /\blet\s+\w+\s*:/,
+    /\bvar\s+\w+\s*:/,
+  ],
+  kotlin: [
+    /\bfun\s+\w+\s*\(/,
+    /\bval\s+\w+/,
+    /\bvar\s+\w+/,
+    /:\s*(Int|String|Boolean|Unit)\b/,
+  ],
+  dart: [
+    /\bvoid\s+main\s*\(/,
+    /\bprint\s*\(/,
+    /\bfinal\s+\w+/,
+    /\bString\b/,
+  ],
+  sql: [
+    /\bSELECT\b/i,
+    /\bFROM\b/i,
+    /\bWHERE\b/i,
+    /\bINSERT\s+INTO\b/i,
+  ],
+  cpp: [
+    /#include\s*<\w+>/,
+    /\bstd::/,
+    /\bcout\s*<</,
+    /\bint\s+main\s*\(/,
+  ],
+  ruby: [
+    /^\s*def\s+\w+/m,
+    /\bputs\s+/,
+    /^\s*end\s*$/m,
+    /@\w+/,
+  ],
+  html: [
+    /<!doctype html>/i,
+    /<\/?(html|head|body|title|meta|link|div|span|script|style|p|h1|h2|form|input|button|section|article|main|header|footer)\b/i,
+    /<(html|head|body|title|meta|link)\b/i,
+  ],
+  css: [
+    /[.#]?[a-zA-Z][\w-]*\s*\{[^}]*:[^;]+;?/m,
+    /@media\b/,
+    /\b(color|display|margin|padding|font-size|background)\s*:/,
+  ],
+};
+
+function getLanguageSignalScore(snippet: string, languageKey: keyof typeof LANG_LABELS) {
+  const patterns = LANGUAGE_PATTERNS[languageKey] ?? [];
+  return patterns.reduce(
+    (score, pattern) => score + (pattern.test(snippet) ? 1 : 0),
+    0,
+  );
+}
+
+function getLikelyLanguageMismatch(snippet: string, selectedLanguage: keyof typeof LANG_LABELS) {
+  const scores = (Object.keys(LANG_LABELS) as Array<keyof typeof LANG_LABELS>).map((languageKey) => ({
+    language: languageKey,
+    score: getLanguageSignalScore(snippet, languageKey),
+  }));
+
+  const bestMatch = scores.reduce((best, current) =>
+    current.score > best.score ? current : best,
+  );
+  const selectedScore =
+    scores.find(({ language }) => language === selectedLanguage)?.score ?? 0;
+
+  if (
+    bestMatch.language !== selectedLanguage &&
+    bestMatch.score >= 2 &&
+    selectedScore === 0
+  ) {
+    return bestMatch.language;
+  }
+
+  return null;
+}
+
 type Status = "idle" | "loading" | "success" | "error";
 
 interface HistoryItem {
   id: string;
   timestamp: number;
   code: string;
+  errorMessage: string;
   language: string;
   mode: string;
   output: string;
   explanation: string;
 }
 
+const extractSection = (text: string, sectionName: string) => {
+  const pattern = new RegExp(
+    `${sectionName}:\\s*([\\s\\S]*?)(?=\\n[A-Z_]+:|$)`,
+    "i",
+  );
+  return pattern.exec(text)?.[1]?.trim() || "";
+};
+
+const parseListSection = (text: string, sectionName: string) =>
+  extractSection(text, sectionName)
+    .split("\n")
+    .map((line) => line.replace(/^[-*•]\s*/, "").trim().toLowerCase())
+    .filter(Boolean);
+
+const normalizeForComparison = (value: string) =>
+  value.replace(/\r\n/g, "\n").trim();
+
+const collapseRepeatedOutput = (originalCode: string, fixedCode: string) => {
+  const normalizedOriginal = normalizeForComparison(originalCode);
+  const normalizedFixed = normalizeForComparison(fixedCode);
+
+  if (!normalizedFixed) return fixedCode;
+  if (normalizedFixed === normalizedOriginal) return originalCode;
+
+  const doubledWithNewline = `${normalizedOriginal}\n${normalizedOriginal}`;
+  const doubledDirect = `${normalizedOriginal}${normalizedOriginal}`;
+
+  if (
+    normalizedFixed === doubledWithNewline ||
+    normalizedFixed === doubledDirect
+  ) {
+    return originalCode;
+  }
+
+  const fixedLines = normalizedFixed.split("\n");
+  if (fixedLines.length % 2 === 0) {
+    const half = fixedLines.length / 2;
+    const firstHalf = fixedLines.slice(0, half).join("\n").trim();
+    const secondHalf = fixedLines.slice(half).join("\n").trim();
+
+    if (
+      firstHalf &&
+      firstHalf === secondHalf &&
+      firstHalf === normalizedOriginal
+    ) {
+      return originalCode;
+    }
+  }
+
+  return fixedCode;
+};
+
 export default function Index() {
   const { toast } = useToast();
   const [code, setCode] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
   const [language, setLanguage] = useState("javascript");
   const [mode, setMode] = useState("Debug");
   const [status, setStatus] = useState<Status>("idle");
@@ -121,6 +305,7 @@ export default function Index() {
 
   const loadFromHistory = (item: HistoryItem) => {
     setCode(item.code);
+    setErrorMessage(item.errorMessage || "");
     setLanguage(item.language);
     setMode(item.mode);
     setOutput(item.output);
@@ -135,6 +320,7 @@ export default function Index() {
 
   const handleAnalyze = async () => {
     if (!code.trim()) return;
+    const normalizedCode = code.trim();
 
     // ✅ Client-side validation: Check if input looks like code
     const codeKeywords = [
@@ -146,10 +332,10 @@ export default function Index() {
     ];
 
     const hasKeyword = codeKeywords.some((keyword) =>
-      code.toLowerCase().includes(keyword.toLowerCase()),
+      normalizedCode.toLowerCase().includes(keyword.toLowerCase()),
     );
-    const hasMinLength = code.trim().length > 10;
-    const hasCodeSymbol = /[{}();=<>]/.test(code);
+    const hasMinLength = normalizedCode.length > 10;
+    const hasCodeSymbol = /[{}();=<>]/.test(normalizedCode);
 
     if (!hasKeyword && !(hasMinLength && hasCodeSymbol)) {
       toast({
@@ -169,6 +355,29 @@ export default function Index() {
       return;
     }
 
+    if (errorMessage.length > 3000) {
+      toast({
+        variant: "destructive",
+        title: "Error Details Too Long",
+        description: "Error message or stack trace is too long. Please shorten it to 3000 characters or less.",
+      });
+      return;
+    }
+
+    const detectedLanguage = getLikelyLanguageMismatch(
+      normalizedCode,
+      language as keyof typeof LANG_LABELS,
+    );
+
+    if (detectedLanguage) {
+      toast({
+        variant: "destructive",
+        title: "Language Mismatch",
+        description: `Your code looks like ${LANG_LABELS[detectedLanguage]}, but the dropdown is set to ${LANG_LABELS[language as keyof typeof LANG_LABELS]}. Please select the correct language first.`,
+      });
+      return;
+    }
+
     setStatus("loading");
     setOutput("");
     setExplanation("");
@@ -179,7 +388,7 @@ export default function Index() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ code, language, mode }),
+        body: JSON.stringify({ code, errorMessage, language, mode }),
       });
 
       if (!response.ok) {
@@ -193,26 +402,34 @@ export default function Index() {
       // --- Safe Parsing Logic ---
       let fixedCode = "AI did not return a valid code block.";
       let explanationPart = result;
+      const bugTypes = parseListSection(result, "BUG_TYPE");
+      const changesMade = parseListSection(result, "CHANGES_MADE");
+      const noBugFound =
+        bugTypes.includes("no-bug-found") ||
+        (changesMade.length === 1 && changesMade[0] === "none");
 
-      // Preferred format: backend returns labeled response (FIXED_CODE, BUGS_FOUND, etc.)
-      const fixedCodeMatch = /FIXED_CODE:\s*([\s\S]*?)(?=\n[A-Z_]+:|$)/i.exec(
-        result,
-      );
-      if (fixedCodeMatch && fixedCodeMatch[1].trim().length > 0) {
-        fixedCode = fixedCodeMatch[1].trim();
+      if (noBugFound) {
+        fixedCode = code;
       } else {
-        // Fallback: parse triple-backtick code block (legacy behavior)
-        const codeBlockStart = result.indexOf("```");
-        const codeBlockEnd = result.lastIndexOf("```");
+        const fixedCodeSection = extractSection(result, "FIXED_CODE");
+        if (fixedCodeSection.length > 0) {
+          fixedCode = fixedCodeSection;
+        } else {
+          // Fallback: parse triple-backtick code block (legacy behavior)
+          const codeBlockStart = result.indexOf("```");
+          const codeBlockEnd = result.lastIndexOf("```");
 
-        if (codeBlockStart !== -1 && codeBlockEnd > codeBlockStart) {
-          const codeBlock = result.substring(codeBlockStart, codeBlockEnd + 3);
-          const firstLineEnd = codeBlock.indexOf("\n");
-          fixedCode = codeBlock
-            .substring(firstLineEnd + 1, codeBlock.length - 3)
-            .trim();
+          if (codeBlockStart !== -1 && codeBlockEnd > codeBlockStart) {
+            const codeBlock = result.substring(codeBlockStart, codeBlockEnd + 3);
+            const firstLineEnd = codeBlock.indexOf("\n");
+            fixedCode = codeBlock
+              .substring(firstLineEnd + 1, codeBlock.length - 3)
+              .trim();
+          }
         }
       }
+
+      fixedCode = collapseRepeatedOutput(code, fixedCode);
 
       setOutput(fixedCode);
       setExplanation(explanationPart);
@@ -221,6 +438,7 @@ export default function Index() {
       // Save to history
       addToHistory({
         code,
+        errorMessage,
         language,
         mode,
         output: fixedCode,
@@ -258,6 +476,7 @@ export default function Index() {
 
   const handleReset = () => {
     setCode("");
+    setErrorMessage("");
     setOutput("");
     setExplanation("");
     setStatus("idle");
@@ -383,6 +602,8 @@ export default function Index() {
               <CodeInputPanel
                 code={code}
                 setCode={setCode}
+                errorMessage={errorMessage}
+                setErrorMessage={setErrorMessage}
                 language={language}
                 setLanguage={setLanguage}
                 loading={status === "loading"}

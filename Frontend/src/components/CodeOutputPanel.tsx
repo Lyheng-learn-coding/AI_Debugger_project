@@ -1,8 +1,9 @@
 import { CheckCircle, Code, Copy, RotateCcw, Maximize2, Split } from "lucide-react";
-import { useState, useMemo } from "react";
+import { CSSProperties, useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { refractor } from "refractor";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Card, CardHeader, CardContent, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -45,37 +46,322 @@ interface DiffLine {
   value: string;
 }
 
+interface DiffSegment {
+  type: 'added' | 'removed' | 'equal';
+  value: string;
+}
+
+interface HighlightedDiffLine {
+  value: string;
+  segments: DiffSegment[];
+  isEntireLineAdded?: boolean;
+}
+
+interface StyledTextSegment {
+  value: string;
+  style?: CSSProperties;
+}
+
+const LANGUAGE_ALIASES: Record<string, string> = {
+  javascript: "javascript",
+  typescript: "typescript",
+  python: "python",
+  java: "java",
+  "c#": "csharp",
+  csharp: "csharp",
+  php: "php",
+  go: "go",
+  swift: "swift",
+  kotlin: "kotlin",
+  dart: "dart",
+  sql: "sql",
+  "c++": "cpp",
+  cpp: "cpp",
+  ruby: "ruby",
+  html: "markup",
+  css: "css",
+};
+
+function resolveLanguage(language: string) {
+  return LANGUAGE_ALIASES[language.toLowerCase()] ?? language.toLowerCase();
+}
+
+function extractNodeText(node: any): string {
+  if (node.type === "text") return node.value ?? "";
+  if (!node.children) return "";
+  return node.children.map(extractNodeText).join("");
+}
+
+function getTokenStyle(classNames: string[] = []): CSSProperties | undefined {
+  const tokens = classNames.filter((className) => className !== "token");
+  const styles = tokens
+    .flatMap((token) => [
+      vscDarkPlus[token as keyof typeof vscDarkPlus],
+      vscDarkPlus[`.${token}` as keyof typeof vscDarkPlus],
+      vscDarkPlus[tokens.join(".") as keyof typeof vscDarkPlus],
+      vscDarkPlus[`.${tokens.join(".")}` as keyof typeof vscDarkPlus],
+    ])
+    .filter(Boolean);
+
+  if (styles.length === 0) return undefined;
+
+  return Object.assign({}, ...styles) as CSSProperties;
+}
+
+function pushStyledSegment(segments: StyledTextSegment[], value: string, style?: CSSProperties) {
+  if (!value) return;
+
+  const lastSegment = segments[segments.length - 1];
+  if (
+    lastSegment &&
+    lastSegment.value &&
+    JSON.stringify(lastSegment.style ?? {}) === JSON.stringify(style ?? {})
+  ) {
+    lastSegment.value += value;
+    return;
+  }
+
+  segments.push({ value, style });
+}
+
+function flattenHighlightNodes(nodes: any[], inheritedStyle?: CSSProperties): StyledTextSegment[] {
+  const segments: StyledTextSegment[] = [];
+
+  nodes.forEach((node) => {
+    if (node.type === "text") {
+      pushStyledSegment(segments, node.value ?? "", inheritedStyle);
+      return;
+    }
+
+    const nodeStyle = {
+      ...(inheritedStyle ?? {}),
+      ...(getTokenStyle(node.properties?.className) ?? {}),
+    };
+
+    if (node.children?.length) {
+      flattenHighlightNodes(node.children, nodeStyle).forEach((segment) => {
+        pushStyledSegment(segments, segment.value, segment.style);
+      });
+      return;
+    }
+
+    pushStyledSegment(segments, extractNodeText(node), nodeStyle);
+  });
+
+  return segments;
+}
+
+function tokenizeLine(line: string, language: string): StyledTextSegment[] {
+  if (!line) return [{ value: " " }];
+
+  try {
+    const tree = refractor.highlight(line, language);
+    const segments = flattenHighlightNodes(tree.children as any[]);
+    return segments.length > 0 ? segments : [{ value: line }];
+  } catch {
+    return [{ value: line }];
+  }
+}
+
+function pushSegment(segments: DiffSegment[], type: DiffSegment['type'], value: string) {
+  if (!value) return;
+
+  const lastSegment = segments[segments.length - 1];
+  if (lastSegment && lastSegment.type === type) {
+    lastSegment.value += value;
+    return;
+  }
+
+  segments.push({ type, value });
+}
+
+function computeInlineDiff(oldValue: string, newValue: string) {
+  const oldChars = [...oldValue];
+  const newChars = [...newValue];
+  const lcs: number[][] = Array.from({ length: oldChars.length + 1 }, () =>
+    Array(newChars.length + 1).fill(0),
+  );
+
+  for (let i = oldChars.length - 1; i >= 0; i -= 1) {
+    for (let j = newChars.length - 1; j >= 0; j -= 1) {
+      if (oldChars[i] === newChars[j]) {
+        lcs[i][j] = lcs[i + 1][j + 1] + 1;
+      } else {
+        lcs[i][j] = Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+      }
+    }
+  }
+
+  const removedSegments: DiffSegment[] = [];
+  const addedSegments: DiffSegment[] = [];
+
+  let i = 0;
+  let j = 0;
+
+  while (i < oldChars.length && j < newChars.length) {
+    if (oldChars[i] === newChars[j]) {
+      pushSegment(removedSegments, 'equal', oldChars[i]);
+      pushSegment(addedSegments, 'equal', newChars[j]);
+      i += 1;
+      j += 1;
+    } else if (lcs[i + 1][j] >= lcs[i][j + 1]) {
+      pushSegment(removedSegments, 'removed', oldChars[i]);
+      i += 1;
+    } else {
+      pushSegment(addedSegments, 'added', newChars[j]);
+      j += 1;
+    }
+  }
+
+  while (i < oldChars.length) {
+    pushSegment(removedSegments, 'removed', oldChars[i]);
+    i += 1;
+  }
+
+  while (j < newChars.length) {
+    pushSegment(addedSegments, 'added', newChars[j]);
+    j += 1;
+  }
+
+  return { removedSegments, addedSegments };
+}
+
 function computeDiff(oldStr: string, newStr: string): DiffLine[] {
   const oldLines = oldStr.split('\n');
   const newLines = newStr.split('\n');
   const diff: DiffLine[] = [];
-  
-  let i = 0, j = 0;
-  while (i < oldLines.length || j < newLines.length) {
-    if (i < oldLines.length && j < newLines.length && oldLines[i] === newLines[j]) {
-      diff.push({ type: 'equal', value: oldLines[i] });
-      i++;
-      j++;
-    } else {
-      if (i < oldLines.length && !newLines.includes(oldLines[i])) {
-        diff.push({ type: 'removed', value: oldLines[i] });
-        i++;
-      } else if (j < newLines.length && !oldLines.includes(newLines[j])) {
-        diff.push({ type: 'added', value: newLines[j] });
-        j++;
+
+  let start = 0;
+  while (
+    start < oldLines.length &&
+    start < newLines.length &&
+    oldLines[start] === newLines[start]
+  ) {
+    diff.push({ type: 'equal', value: oldLines[start] });
+    start += 1;
+  }
+
+  let oldEnd = oldLines.length - 1;
+  let newEnd = newLines.length - 1;
+  const suffix: DiffLine[] = [];
+
+  while (
+    oldEnd >= start &&
+    newEnd >= start &&
+    oldLines[oldEnd] === newLines[newEnd]
+  ) {
+    suffix.unshift({ type: 'equal', value: oldLines[oldEnd] });
+    oldEnd -= 1;
+    newEnd -= 1;
+  }
+
+  const oldMiddle = oldLines.slice(start, oldEnd + 1);
+  const newMiddle = newLines.slice(start, newEnd + 1);
+
+  const lcs: number[][] = Array.from({ length: oldMiddle.length + 1 }, () =>
+    Array(newMiddle.length + 1).fill(0),
+  );
+
+  for (let i = oldMiddle.length - 1; i >= 0; i -= 1) {
+    for (let j = newMiddle.length - 1; j >= 0; j -= 1) {
+      if (oldMiddle[i] === newMiddle[j]) {
+        lcs[i][j] = lcs[i + 1][j + 1] + 1;
       } else {
-        if (i < oldLines.length) {
-            diff.push({ type: 'removed', value: oldLines[i] });
-            i++;
-        }
-        if (j < newLines.length) {
-            diff.push({ type: 'added', value: newLines[j] });
-            j++;
-        }
+        lcs[i][j] = Math.max(lcs[i + 1][j], lcs[i][j + 1]);
       }
     }
   }
-  return diff;
+
+  let i = 0;
+  let j = 0;
+
+  while (i < oldMiddle.length && j < newMiddle.length) {
+    if (oldMiddle[i] === newMiddle[j]) {
+      diff.push({ type: 'equal', value: oldMiddle[i] });
+      i += 1;
+      j += 1;
+    } else if (lcs[i + 1][j] >= lcs[i][j + 1]) {
+      diff.push({ type: 'removed', value: oldMiddle[i] });
+      i += 1;
+    } else {
+      diff.push({ type: 'added', value: newMiddle[j] });
+      j += 1;
+    }
+  }
+
+  while (i < oldMiddle.length) {
+    diff.push({ type: 'removed', value: oldMiddle[i] });
+    i += 1;
+  }
+
+  while (j < newMiddle.length) {
+    diff.push({ type: 'added', value: newMiddle[j] });
+    j += 1;
+  }
+
+  return [...diff, ...suffix];
+}
+
+function buildHighlightedDiffLines(diffLines: DiffLine[]): HighlightedDiffLine[] {
+  const result: HighlightedDiffLine[] = [];
+
+  let index = 0;
+
+  while (index < diffLines.length) {
+    const line = diffLines[index];
+
+    if (line.type === 'equal') {
+      result.push({
+        value: line.value,
+        segments: [{ type: 'equal', value: line.value }],
+      });
+      index += 1;
+      continue;
+    }
+
+    if (line.type === 'removed') {
+      const removedRun: string[] = [];
+      while (index < diffLines.length && diffLines[index].type === 'removed') {
+        removedRun.push(diffLines[index].value);
+        index += 1;
+      }
+
+      const addedRun: string[] = [];
+      while (index < diffLines.length && diffLines[index].type === 'added') {
+        addedRun.push(diffLines[index].value);
+        index += 1;
+      }
+
+      const pairedCount = Math.min(removedRun.length, addedRun.length);
+
+      for (let i = 0; i < pairedCount; i += 1) {
+        const { addedSegments } = computeInlineDiff(removedRun[i], addedRun[i]);
+        result.push({
+          value: addedRun[i],
+          segments: addedSegments.length > 0 ? addedSegments : [{ type: 'equal', value: addedRun[i] }],
+        });
+      }
+
+      for (let i = pairedCount; i < addedRun.length; i += 1) {
+        result.push({
+          value: addedRun[i],
+          segments: [{ type: 'added', value: addedRun[i] }],
+          isEntireLineAdded: true,
+        });
+      }
+
+      continue;
+    }
+
+    result.push({
+      value: line.value,
+      segments: [{ type: 'added', value: line.value }],
+      isEntireLineAdded: true,
+    });
+    index += 1;
+  }
+
+  return result;
 }
 
 interface FullViewModalProps {
@@ -180,11 +466,13 @@ export default function CodeOutputPanel({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDiffMode, setIsDiffMode] = useState(false);
   const isMobile = useIsMobile();
+  const hasChanges = originalCode !== output;
+  const syntaxLanguage = resolveLanguage(langLabel);
 
   const diffLines = useMemo(() => {
-    if (!isDiffMode || !output) return [];
-    return computeDiff(originalCode, output);
-  }, [isDiffMode, originalCode, output]);
+    if (!isDiffMode || !output || !hasChanges) return [];
+    return buildHighlightedDiffLines(computeDiff(originalCode, output));
+  }, [hasChanges, isDiffMode, originalCode, output]);
 
   const CodeBlock = () => (
     <SyntaxHighlighter
@@ -207,21 +495,78 @@ export default function CodeOutputPanel({
     </SyntaxHighlighter>
   );
 
+  const renderSyntaxColoredSegments = (line: HighlightedDiffLine) => {
+    const syntaxSegments = tokenizeLine(line.value, syntaxLanguage);
+    const rendered: Array<JSX.Element> = [];
+
+    let syntaxIndex = 0;
+    let syntaxOffset = 0;
+    let renderedIndex = 0;
+
+    line.segments.forEach((segment) => {
+      let remaining = segment.value.length;
+
+      if (remaining === 0) {
+        return;
+      }
+
+      while (remaining > 0 && syntaxIndex < syntaxSegments.length) {
+        const currentSyntaxSegment = syntaxSegments[syntaxIndex];
+        const available = currentSyntaxSegment.value.length - syntaxOffset;
+        const sliceLength = Math.min(remaining, available);
+        const sliceValue = currentSyntaxSegment.value.slice(
+          syntaxOffset,
+          syntaxOffset + sliceLength,
+        );
+
+        rendered.push(
+          <span
+            key={`${line.value}-${renderedIndex}`}
+            className={segment.type === "added" ? "bg-success/20 rounded-sm" : undefined}
+            style={
+              segment.type === "added"
+                ? { ...(currentSyntaxSegment.style ?? {}), color: "hsl(var(--success))" }
+                : currentSyntaxSegment.style
+            }
+          >
+            {sliceValue}
+          </span>,
+        );
+
+        renderedIndex += 1;
+        remaining -= sliceLength;
+        syntaxOffset += sliceLength;
+
+        if (syntaxOffset >= currentSyntaxSegment.value.length) {
+          syntaxIndex += 1;
+          syntaxOffset = 0;
+        }
+      }
+    });
+
+    if (rendered.length === 0) {
+      rendered.push(
+        <span key={`${line.value}-fallback`} style={{ color: "inherit" }}>
+          {line.value || " "}
+        </span>,
+      );
+    }
+
+    return rendered;
+  };
+
   const DiffBlock = () => (
     <div className="font-mono text-xs sm:text-sm leading-6 p-4 overflow-auto h-full bg-code-bg">
       {diffLines.map((line, idx) => (
-        <div 
-          key={idx} 
-          className={`flex px-2 rounded-sm mb-0.5 ${
-            line.type === 'added' ? 'bg-success/15 text-success' : 
-            line.type === 'removed' ? 'bg-destructive/15 text-destructive line-through opacity-70' : 
-            'text-muted-foreground'
+        <div
+          key={`${idx}-${line.value}`}
+          className={`px-3 rounded-sm mb-1 ${
+            line.isEntireLineAdded ? 'bg-success/10' : 'bg-transparent'
           }`}
         >
-          <span className="w-6 shrink-0 opacity-50 select-none font-bold">
-            {line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' '}
-          </span>
-          <pre className="whitespace-pre-wrap flex-1">{line.value || ' '}</pre>
+          <pre className="whitespace-pre-wrap">
+            {renderSyntaxColoredSegments(line)}
+          </pre>
         </div>
       ))}
     </div>
@@ -237,7 +582,7 @@ export default function CodeOutputPanel({
           <CardTitle className="text-base">Fixed Code</CardTitle>
         </div>
         <div className="flex items-center gap-4">
-          {status === "success" && (
+          {status === "success" && hasChanges && (
             <div className="flex items-center space-x-2 bg-secondary/40 px-3 py-1.5 rounded-full border border-border/50">
               <Split className={`h-3.5 w-3.5 ${isDiffMode ? 'text-primary' : 'text-muted-foreground'}`} />
               <Label htmlFor="diff-mode" className="text-[10px] font-bold uppercase tracking-wider cursor-pointer select-none">Diff View</Label>
@@ -302,7 +647,7 @@ export default function CodeOutputPanel({
                 transition={{ duration: 0.2 }}
                 className="h-full"
               >
-                {isDiffMode ? <DiffBlock /> : <CodeBlock />}
+                {isDiffMode && hasChanges ? <DiffBlock /> : <CodeBlock />}
               </motion.div>
             </AnimatePresence>
           </div>

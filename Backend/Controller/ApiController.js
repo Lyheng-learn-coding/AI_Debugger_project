@@ -83,7 +83,7 @@ const buildModeInstruction = (mode) => {
   return "Analyze the code for bugs, root causes, and the safest fix.";
 };
 
-const buildPrompt = ({ code, language, mode }) => `
+const buildPrompt = ({ code, errorMessage, language, mode }) => `
 You are a senior software engineer and debugging specialist.
 Current Mode: ${mode}
 ${buildModeInstruction(mode)}
@@ -101,7 +101,11 @@ Rules:
 - Do not change the overall logic unless the bug cannot be fixed without doing so
 - Always return valid runnable ${language} code
 - Prefer the smallest safe fix over a large rewrite
-- Add only brief comments when they help explain a non-obvious fix
+- Preserve the original formatting, indentation, spacing, and line breaks whenever possible
+- Change only the smallest possible part of the code
+- Do not rewrite unchanged lines
+- Do not add comments inside FIXED_CODE unless a comment is required for correctness
+- Add only brief comments when they help explain a non-obvious fix outside the fixed code sections
 - Do NOT wrap the fixed code in markdown backticks
 - Do NOT add \`\`\`${language} or \`\`\` anywhere
 - Khmer explanation must be written in proper Khmer script (ភាសាខ្មែរ)
@@ -110,6 +114,8 @@ Rules:
 - If Mode is ELI5, make both English and Khmer explanations extra simple
 - Keep lists short and concrete
 - Do not add any section other than the required format
+- If an error message or stack trace is provided, use it as strong debugging evidence
+- Mention the relationship between the code and the provided error when relevant
 
 Return in EXACTLY this format and nothing else:
 
@@ -172,14 +178,19 @@ EXPLANATION_EN:
 EXPLANATION_KH:
 // same explanation in Khmer script
 
-Code to analyze:
+${errorMessage?.trim()
+  ? `Runtime Error / Stack Trace:
+${errorMessage}
+
+`
+  : ""}Code to analyze:
 ${code}
 `;
 
 const viewResult = async (req, res) => {
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    const { code, language, mode = "Debug" } = req.body;
+    const { code, errorMessage = "", language, mode = "Debug" } = req.body;
 
     if (!code || !language) {
       return res.status(400).json({
@@ -207,9 +218,16 @@ const viewResult = async (req, res) => {
       });
     }
 
+    if (errorMessage.length > 3000) {
+      return res.status(400).json({
+        message:
+          "Error message or stack trace is too long. Please keep it under 3000 characters.",
+      });
+    }
+
     const result = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: [{ role: "user", parts: [{ text: buildPrompt({ code, language, mode }) }] }],
+      contents: [{ role: "user", parts: [{ text: buildPrompt({ code, errorMessage, language, mode }) }] }],
       config: {
         thinkingLevel: "low",
       },

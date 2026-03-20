@@ -1,5 +1,6 @@
 ﻿import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useRef } from "react";
 import {
   AlertTriangle,
   Languages,
@@ -13,10 +14,19 @@ import { Card, CardHeader, CardContent, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { useToast } from "@/hooks/use-toast";
 
 type Status = "idle" | "loading" | "success" | "error";
 type Language = "en" | "kh";
-type SpeakerId = "summary" | "rootCause" | "changes" | "prevention" | null;
+type VoicePreference = "female" | "male";
+type SpeakerId =
+  | "errorSummaryCard"
+  | "rootCauseCard"
+  | "changesCard"
+  | "preventionCard"
+  | "whyFixWorksPanel"
+  | "fullExplanationPanel"
+  | null;
 
 type SectionMap = Record<string, string>;
 
@@ -84,13 +94,17 @@ function toList(content?: string): string[] {
 
   return content
     .split("\n")
-    .map((line) => line.replace(/^[-*•]\s*/, "").trim())
+    .map((line) => line.replace(/^[-*•]\s*/, "").replace(/^\/\/\s*/, "").trim())
     .filter(Boolean)
     .filter((line) => line.toLowerCase() !== "none");
 }
 
 function cleanText(content?: string): string {
-  return content?.trim() || "";
+  return content
+    ?.split("\n")
+    .map((line) => line.replace(/^\/\/\s*/, "").trim())
+    .filter(Boolean)
+    .join("\n") || "";
 }
 
 function parseExplanation(text: string): ParsedExplanation {
@@ -127,6 +141,63 @@ const fadeIn = {
     ease: [0.25, 0.1, 0.25, 1] as [number, number, number, number],
   },
 };
+
+const FEMALE_VOICE_HINTS = [
+  "female",
+  "woman",
+  "zira",
+  "hazel",
+  "samantha",
+  "victoria",
+  "karen",
+  "moira",
+  "ava",
+  "aria",
+  "jenny",
+  "joanna",
+  "serena",
+  "sonia",
+  "susan",
+  "zira",
+  "zira desktop",
+];
+
+const MALE_VOICE_HINTS = [
+  "male",
+  "man",
+  "david",
+  "mark",
+  "george",
+  "daniel",
+  "alex",
+  "tom",
+  "fred",
+  "oliver",
+  "arthur",
+  "guy",
+];
+
+function pickPreferredVoice(
+  voices: SpeechSynthesisVoice[],
+  matcher: (voice: SpeechSynthesisVoice) => boolean,
+  preference: VoicePreference,
+) {
+  const matchingVoices = voices.filter(matcher);
+
+  if (matchingVoices.length === 0) {
+    return null;
+  }
+
+  const preferredHints =
+    preference === "female" ? FEMALE_VOICE_HINTS : MALE_VOICE_HINTS;
+
+  const preferredVoice = matchingVoices.find((voice) => {
+    const voiceName = voice.name.toLowerCase();
+    return preferredHints.some((hint) => voiceName.includes(hint));
+  });
+
+  return preferredVoice ?? matchingVoices[0];
+}
 
 interface SectionCardProps {
   title: string;
@@ -211,7 +282,10 @@ interface Props {
 
 export default function ExplanationCards({ status, explanation }: Props) {
   const [lang, setLang] = useState<Language>("en");
+  const [voicePreference, setVoicePreference] = useState<VoicePreference>("female");
   const [activeSpeaker, setActiveSpeaker] = useState<SpeakerId>(null);
+  const { toast } = useToast();
+  const isManualSpeechStop = useRef(false);
 
   const parsed = useMemo(
     () => (status === "success" ? parseExplanation(explanation) : null),
@@ -220,6 +294,7 @@ export default function ExplanationCards({ status, explanation }: Props) {
 
   useEffect(() => {
     return () => {
+      isManualSpeechStop.current = true;
       window.speechSynthesis.cancel();
     };
   }, []);
@@ -227,12 +302,28 @@ export default function ExplanationCards({ status, explanation }: Props) {
   const handleSpeak = (text: string, language: Language, id: SpeakerId) => {
     if (!text) return;
 
+    if (!("speechSynthesis" in window)) {
+      toast({
+        variant: "destructive",
+        title: "Speech not supported",
+        description:
+          language === "kh"
+            ? "Your device or browser cannot read Khmer text aloud."
+            : "Your device or browser does not support text-to-speech.",
+      });
+      return;
+    }
+
     if (activeSpeaker === id) {
+      isManualSpeechStop.current = true;
       window.speechSynthesis.cancel();
       setActiveSpeaker(null);
       return;
     }
 
+    if (activeSpeaker) {
+      isManualSpeechStop.current = true;
+    }
     window.speechSynthesis.cancel();
 
     const utterance = new SpeechSynthesisUtterance(text);
@@ -240,25 +331,68 @@ export default function ExplanationCards({ status, explanation }: Props) {
 
     if (language === "kh") {
       utterance.lang = "km-KH";
-      const khmerVoice = voices.find(
+      const khmerVoice = pickPreferredVoice(
+        voices,
         (voice) =>
           voice.lang.toLowerCase().startsWith("km") ||
           voice.name.toLowerCase().includes("khmer") ||
           voice.lang.toLowerCase().includes("kh"),
+        voicePreference,
       );
-      if (khmerVoice) utterance.voice = khmerVoice;
+
+      if (!khmerVoice) {
+        toast({
+          variant: "destructive",
+          title: "Khmer speech unavailable",
+          description:
+            "This device does not have a Khmer voice installed, so Khmer text cannot be read aloud here.",
+        });
+        return;
+      }
+
+      utterance.voice = khmerVoice;
     } else {
       utterance.lang = "en-US";
-      const englishVoice = voices.find(
+      const englishVoice = pickPreferredVoice(
+        voices,
         (voice) => voice.lang.includes("en-US") || voice.lang.includes("en-GB"),
+        voicePreference,
       );
       if (englishVoice) utterance.voice = englishVoice;
     }
 
     utterance.rate = 0.85;
-    utterance.onstart = () => setActiveSpeaker(id);
-    utterance.onend = () => setActiveSpeaker(null);
-    utterance.onerror = () => setActiveSpeaker(null);
+    utterance.onstart = () => {
+      isManualSpeechStop.current = false;
+      setActiveSpeaker(id);
+    };
+    utterance.onend = () => {
+      isManualSpeechStop.current = false;
+      setActiveSpeaker(null);
+    };
+    utterance.onerror = (event) => {
+      setActiveSpeaker(null);
+
+      const isExpectedStop =
+        isManualSpeechStop.current ||
+        event.error === "interrupted" ||
+        event.error === "canceled";
+
+      isManualSpeechStop.current = false;
+
+      if (isExpectedStop) {
+        return;
+      }
+
+      toast({
+        variant: "destructive",
+        title: language === "kh" ? "Khmer speech failed" : "Speech failed",
+        description:
+          language === "kh"
+            ? "Your device could not play Khmer text-to-speech."
+            : "Your device could not play text-to-speech.",
+      });
+    };
 
     window.speechSynthesis.speak(utterance);
   };
@@ -266,7 +400,7 @@ export default function ExplanationCards({ status, explanation }: Props) {
   const cards = parsed
     ? [
         {
-          speakerId: "summary" as SpeakerId,
+          speakerId: "errorSummaryCard" as SpeakerId,
           title: lang === "en" ? "Error Summary" : "សេចក្តីសង្ខេបបញ្ហា",
           icon: AlertTriangle,
           accentClass: "text-destructive",
@@ -275,7 +409,7 @@ export default function ExplanationCards({ status, explanation }: Props) {
           textToSpeak: (lang === "en" ? parsed.errorSummaryEn : parsed.errorSummaryKh).join(". "),
         },
         {
-          speakerId: "rootCause" as SpeakerId,
+          speakerId: "rootCauseCard" as SpeakerId,
           title: lang === "en" ? "Root Cause" : "មូលហេតុពិត",
           icon: Lightbulb,
           accentClass: "text-amber-500",
@@ -284,7 +418,7 @@ export default function ExplanationCards({ status, explanation }: Props) {
           textToSpeak: (lang === "en" ? parsed.rootCauseEn : parsed.rootCauseKh).join(". "),
         },
         {
-          speakerId: "changes" as SpeakerId,
+          speakerId: "changesCard" as SpeakerId,
           title: lang === "en" ? "Changes Made" : "ការកែប្រែដែលបានធ្វើ",
           icon: Wrench,
           accentClass: "text-success",
@@ -293,7 +427,7 @@ export default function ExplanationCards({ status, explanation }: Props) {
           textToSpeak: (lang === "en" ? parsed.changesEn : parsed.changesKh).join(". "),
         },
         {
-          speakerId: "prevention" as SpeakerId,
+          speakerId: "preventionCard" as SpeakerId,
           title: lang === "en" ? "Prevention Tips" : "គន្លឹះការពារ",
           icon: ShieldCheck,
           accentClass: "text-primary",
@@ -309,6 +443,7 @@ export default function ExplanationCards({ status, explanation }: Props) {
   const whyItWorks = parsed ? (lang === "en" ? parsed.whyItWorksEn : parsed.whyItWorksKh) : "";
   const alternatives = parsed ? (lang === "en" ? parsed.alternativesEn : parsed.alternativesKh) : [];
   const explanationText = parsed ? (lang === "en" ? parsed.explanationEn : parsed.explanationKh) : "";
+  const khmerHeaderFont = lang === "kh" ? "font-khmer" : "";
 
   return (
     <div className="space-y-6">
@@ -320,21 +455,43 @@ export default function ExplanationCards({ status, explanation }: Props) {
         <div className="flex items-center gap-3 flex-wrap">
           {status === "success" && bugType.length > 0 && (
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+              <span className={`text-[11px] tracking-wider text-muted-foreground ${khmerHeaderFont} ${lang === "en" ? "uppercase" : ""}`}>
                 {lang === "en" ? "Bug Type" : "ប្រភេទបញ្ហា"}
               </span>
               {bugType.map((item, index) => (
-                <Badge key={`${item}-${index}`} variant="outline" className="border-primary/20 bg-secondary/40">
+                <Badge
+                  key={`${item}-${index}`}
+                  variant="outline"
+                  className={`border-primary/20 bg-secondary/40 ${khmerHeaderFont}`}
+                >
                   {item}
                 </Badge>
               ))}
             </div>
           )}
           {status === "success" && confidence && (
-            <Badge className="bg-primary/10 text-primary border border-primary/20 hover:bg-primary/10">
+            <Badge className={`bg-primary/10 text-primary border border-primary/20 hover:bg-primary/10 ${khmerHeaderFont}`}>
               {(lang === "en" ? "Confidence: " : "កម្រិតទំនុកចិត្ត: ") + confidence.replace(/^[-*•]\s*/, "")}
             </Badge>
           )}
+          <div className="flex items-center bg-secondary/50 p-1 rounded-lg border border-border/50">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setVoicePreference("female")}
+              className={`h-8 px-3 text-xs font-bold rounded-md transition-all ${voicePreference === "female" ? "bg-background text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              WOMAN
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setVoicePreference("male")}
+              className={`h-8 px-3 text-xs font-bold rounded-md transition-all ${voicePreference === "male" ? "bg-background text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              MAN
+            </Button>
+          </div>
           <div className="flex bg-secondary/50 p-1 rounded-lg border border-border/50">
             <Button
               variant="ghost"
@@ -385,11 +542,11 @@ export default function ExplanationCards({ status, explanation }: Props) {
               <Button
                 variant="outline"
                 size="sm"
-                className={`h-8 gap-2 border-primary/20 ${activeSpeaker === "summary" ? "bg-primary/10 text-primary" : "bg-background"}`}
-                onClick={() => handleSpeak(whyItWorks, lang, "summary")}
+                className={`h-8 gap-2 border-primary/20 ${activeSpeaker === "whyFixWorksPanel" ? "bg-primary/10 text-primary" : "bg-background"}`}
+                onClick={() => handleSpeak(whyItWorks, lang, "whyFixWorksPanel")}
                 disabled={!whyItWorks}
               >
-                {activeSpeaker === "summary" ? (
+                {activeSpeaker === "whyFixWorksPanel" ? (
                   <>
                     <Square className="h-3.5 w-3.5 fill-current" /> Stop
                   </>
@@ -446,11 +603,11 @@ export default function ExplanationCards({ status, explanation }: Props) {
             <Button
               variant="outline"
               size="sm"
-              className={`h-8 gap-2 border-primary/20 ${activeSpeaker === "rootCause" ? "bg-primary/10 text-primary" : "bg-background"}`}
-              onClick={() => handleSpeak(explanationText, lang, "rootCause")}
+              className={`h-8 gap-2 border-primary/20 ${activeSpeaker === "fullExplanationPanel" ? "bg-primary/10 text-primary" : "bg-background"}`}
+              onClick={() => handleSpeak(explanationText, lang, "fullExplanationPanel")}
               disabled={!explanationText}
             >
-              {activeSpeaker === "rootCause" ? (
+              {activeSpeaker === "fullExplanationPanel" ? (
                 <>
                   <Square className="h-3.5 w-3.5 fill-current" /> Stop
                 </>

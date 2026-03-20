@@ -22,30 +22,108 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import Editor from "@monaco-editor/react";
+import Editor, { type OnMount } from "@monaco-editor/react";
 import { useTheme } from "next-themes";
+import { Textarea } from "@/components/ui/textarea";
 
 const LANGUAGES = [
-  { value: "html", label: "HTML", icon: "https://cdn.simpleicons.org/html5/E34F26" },
-  { value: "css", label: "CSS", icon: "https://cdn.simpleicons.org/css/6b399c" },
-  { value: "javascript", label: "JavaScript", icon: "https://cdn.simpleicons.org/javascript" },
-  { value: "typescript", label: "TypeScript", icon: "https://cdn.simpleicons.org/typescript" },
-  { value: "python", label: "Python", icon: "https://cdn.simpleicons.org/python" },
-  { value: "java", label: "Java", icon: "https://cdn.simpleicons.org/openjdk/white" },
-  { value: "csharp", label: "C#", icon: "https://cdn.simpleicons.org/dotnet" },
-  { value: "php", label: "PHP", icon: "https://cdn.simpleicons.org/php" },
-  { value: "go", label: "Go", icon: "https://cdn.simpleicons.org/go" },
-  { value: "swift", label: "Swift", icon: "https://cdn.simpleicons.org/swift" },
-  { value: "kotlin", label: "Kotlin", icon: "https://cdn.simpleicons.org/kotlin" },
-  { value: "dart", label: "Dart", icon: "https://cdn.simpleicons.org/dart" },
-  { value: "sql", label: "SQL", icon: "https://cdn.simpleicons.org/mysql" },
-  { value: "cpp", label: "C++", icon: "https://cdn.simpleicons.org/cplusplus" },
-  { value: "ruby", label: "Ruby", icon: "https://cdn.simpleicons.org/ruby" },
+  {
+    value: "html",
+    label: "HTML",
+    icon: "https://cdn.simpleicons.org/html5/E34F26",
+    hint: "Use for HTML pages, templates, and markup snippets.",
+  },
+  {
+    value: "css",
+    label: "CSS",
+    icon: "https://cdn.simpleicons.org/css/6b399c",
+    hint: "Use for CSS, SCSS, and styling rules.",
+  },
+  {
+    value: "javascript",
+    label: "JavaScript",
+    icon: "https://cdn.simpleicons.org/javascript",
+    hint: "Use for JavaScript, React, Vue, Next.js, Node.js, and Express.",
+  },
+  {
+    value: "typescript",
+    label: "TypeScript",
+    icon: "https://cdn.simpleicons.org/typescript",
+    hint: "Use for TypeScript, TSX, React, Angular, Next.js, and NestJS.",
+  },
+  {
+    value: "python",
+    label: "Python",
+    icon: "https://cdn.simpleicons.org/python",
+    hint: "Use for Python, Django, Flask, FastAPI, and data scripts.",
+  },
+  {
+    value: "java",
+    label: "Java",
+    icon: "https://skillicons.dev/icons?i=java",
+    hint: "Use for Java, Spring, and Android-style Java code.",
+  },
+  {
+    value: "csharp",
+    label: "C#",
+    icon: "https://cdn.simpleicons.org/dotnet",
+    hint: "Use for C#, ASP.NET, Blazor, and Unity scripts.",
+  },
+  {
+    value: "php",
+    label: "PHP",
+    icon: "https://cdn.simpleicons.org/php",
+    hint: "Use for PHP, Laravel, CodeIgniter, and WordPress snippets.",
+  },
+  {
+    value: "go",
+    label: "Go",
+    icon: "https://cdn.simpleicons.org/go",
+    hint: "Use for Go, Gin, Echo, Fiber, and backend services.",
+  },
+  {
+    value: "swift",
+    label: "Swift",
+    icon: "https://cdn.simpleicons.org/swift",
+    hint: "Use for Swift, SwiftUI, and iOS app code.",
+  },
+  {
+    value: "kotlin",
+    label: "Kotlin",
+    icon: "https://cdn.simpleicons.org/kotlin",
+    hint: "Use for Kotlin, Android, Ktor, and Spring Kotlin code.",
+  },
+  {
+    value: "dart",
+    label: "Dart",
+    icon: "https://cdn.simpleicons.org/dart",
+    hint: "Use for Dart, Flutter, and mobile UI code.",
+  },
+  {
+    value: "sql",
+    label: "SQL",
+    icon: "https://cdn.simpleicons.org/mysql",
+    hint: "Use for SQL queries, schema changes, and database statements.",
+  },
+  {
+    value: "cpp",
+    label: "C++",
+    icon: "https://cdn.simpleicons.org/cplusplus",
+    hint: "Use for C++, STL, game engine code, and systems programming.",
+  },
+  {
+    value: "ruby",
+    label: "Ruby",
+    icon: "https://cdn.simpleicons.org/ruby",
+    hint: "Use for Ruby, Rails, Sinatra, and scripting code.",
+  },
 ];
 
 interface Props {
   code: string;
   setCode: (v: string) => void;
+  errorMessage: string;
+  setErrorMessage: (v: string) => void;
   language: string;
   setLanguage: (v: string) => void;
   loading: boolean;
@@ -61,12 +139,33 @@ interface EditorInstanceProps {
 }
 
 // Defining EditorInstance outside to prevent re-mounting and loss of focus
-const EditorInstance = ({ height, language, value, theme, onChange }: EditorInstanceProps) => (
+const handleEditorMount: OnMount = (editor, monaco) => {
+  monaco.editor.remeasureFonts();
+  editor.render();
+  editor.layout();
+
+  if ("fonts" in document) {
+    void document.fonts.ready.then(() => {
+      monaco.editor.remeasureFonts();
+      editor.render();
+      editor.layout();
+    });
+  }
+};
+
+const EditorInstance = ({
+  height,
+  language,
+  value,
+  theme,
+  onChange,
+}: EditorInstanceProps) => (
   <Editor
     height={height}
     language={language}
     value={value}
     theme={theme === "dark" ? "vs-dark" : "light"}
+    onMount={handleEditorMount}
     onChange={(val) => onChange(val || "")}
     options={{
       minimap: { enabled: false },
@@ -77,10 +176,12 @@ const EditorInstance = ({ height, language, value, theme, onChange }: EditorInst
       automaticLayout: true,
       padding: { top: 16, bottom: 10 },
       fontFamily: "'JetBrains Mono', monospace",
-      cursorBlinking: "smooth",
+      cursorBlinking: "blink",
+      cursorSmoothCaretAnimation: "off",
       smoothScrolling: true,
       contextmenu: false,
       lineHeight: 22,
+      fontLigatures: false,
     }}
   />
 );
@@ -88,6 +189,8 @@ const EditorInstance = ({ height, language, value, theme, onChange }: EditorInst
 export default function CodeInputPanel({
   code,
   setCode,
+  errorMessage,
+  setErrorMessage,
   language,
   setLanguage,
   loading,
@@ -95,10 +198,12 @@ export default function CodeInputPanel({
 }: Props) {
   const { theme } = useTheme();
   const [isFullScreen, setIsFullScreen] = useState(false);
+  const selectedLanguage =
+    LANGUAGES.find((item) => item.value === language) ?? LANGUAGES[0];
 
   return (
     <>
-      <Card className="gradient-border-top glow-violet overflow-hidden transition-transform duration-200 hover:-translate-y-0.5">
+      <Card className="gradient-border-top glow-violet overflow-hidden">
         <CardHeader className="flex flex-row items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg gradient-violet-blue">
@@ -123,7 +228,7 @@ export default function CodeInputPanel({
         </CardHeader>
         <CardContent className="space-y-3">
           <Select value={language} onValueChange={setLanguage}>
-            <SelectTrigger className="w-full bg-secondary border-border">
+            <SelectTrigger className="w-full bg-secondary border-border text-sm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -141,14 +246,37 @@ export default function CodeInputPanel({
               ))}
             </SelectContent>
           </Select>
-          
+          <p className="text-sm leading-6 text-muted-foreground">
+            {selectedLanguage.hint}
+          </p>
+
           <div className="min-h-[350px] w-full rounded-lg border border-border bg-code-bg overflow-hidden">
-            <EditorInstance 
-              height="350px" 
+            <EditorInstance
+              height="350px"
               language={language}
               value={code}
               theme={theme || "dark"}
               onChange={setCode}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium">Error Message or Stack Trace</p>
+                <p className="text-xs text-muted-foreground">
+                  Optional, but helpful for runtime errors and framework issues.
+                </p>
+              </div>
+              <Badge className="bg-secondary text-foreground border-border text-[10px]">
+                Optional
+              </Badge>
+            </div>
+            <Textarea
+              value={errorMessage}
+              onChange={(event) => setErrorMessage(event.target.value)}
+              placeholder="Paste console errors, terminal output, traceback, or stack trace here..."
+              className="min-h-28 resize-y bg-code-bg text-sm leading-6"
             />
           </div>
 
@@ -182,15 +310,15 @@ export default function CodeInputPanel({
               </DialogTitle>
               <div className="flex items-center gap-3">
                 <Badge className="bg-secondary text-foreground border-border px-3 py-1 font-mono uppercase text-[10px]">
-                  {language}
+                  {selectedLanguage.label}
                 </Badge>
               </div>
             </div>
           </DialogHeader>
           <div className="flex-1 p-4 bg-code-bg">
             <div className="h-full rounded-lg border border-white/5 overflow-hidden">
-              <EditorInstance 
-                height="100%" 
+              <EditorInstance
+                height="100%"
                 language={language}
                 value={code}
                 theme={theme || "dark"}
