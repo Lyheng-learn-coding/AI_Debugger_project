@@ -105,6 +105,9 @@ Rules:
 - Change only the smallest possible part of the code
 - Do not rewrite unchanged lines
 - Do not add comments inside FIXED_CODE unless a comment is required for correctness
+- Always return COMMENTED_CODE as the same fixed code but with short language-appropriate comments explaining the changed or important lines
+- In COMMENTED_CODE, include at least one explanatory comment next to the main fix when the code changed
+- Do not comment every line in COMMENTED_CODE
 - Add only brief comments when they help explain a non-obvious fix outside the fixed code sections
 - Do NOT wrap the fixed code in markdown backticks
 - Do NOT add \`\`\`${language} or \`\`\` anywhere
@@ -145,6 +148,9 @@ FIX_CONFIDENCE_KH:
 
 FIXED_CODE:
 // your fixed code here, no markdown, no backticks
+
+COMMENTED_CODE:
+// same fixed code, but with short explanatory comments in the correct comment style for ${language}
 
 CHANGES_MADE:
 - list each important change in English
@@ -190,7 +196,12 @@ ${code}
 const viewResult = async (req, res) => {
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    const { code, errorMessage = "", language, mode = "Debug" } = req.body;
+    const {
+      code,
+      errorMessage = "",
+      language,
+      mode = "Debug",
+    } = req.body;
 
     if (!code || !language) {
       return res.status(400).json({
@@ -227,7 +238,17 @@ const viewResult = async (req, res) => {
 
     const result = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: [{ role: "user", parts: [{ text: buildPrompt({ code, errorMessage, language, mode }) }] }],
+      contents: [{
+        role: "user",
+        parts: [{
+          text: buildPrompt({
+            code,
+            errorMessage,
+            language,
+            mode,
+          }),
+        }],
+      }],
       config: {
         thinkingLevel: "low",
       },
