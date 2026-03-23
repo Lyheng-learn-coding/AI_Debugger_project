@@ -3,8 +3,11 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useRef } from "react";
 import {
   AlertTriangle,
+  Bug,
+  ChevronDown,
   Languages,
   Lightbulb,
+  ListChecks,
   ShieldCheck,
   Square,
   Volume2,
@@ -14,6 +17,15 @@ import { Card, CardHeader, CardContent, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 
 type Status = "idle" | "loading" | "success" | "error";
@@ -26,7 +38,11 @@ type SpeakerId =
   | "preventionCard"
   | "whyFixWorksPanel"
   | "fullExplanationPanel"
+  | "alternativesPanel"
+  | "preventionTabPanel"
   | null;
+
+type SpeakingSection = Exclude<SpeakerId, null>;
 
 type SectionMap = Record<string, string>;
 
@@ -199,6 +215,110 @@ function pickPreferredVoice(
   return preferredVoice ?? matchingVoices[0];
 }
 
+const DEFAULT_VOICE_PREFERENCES: Record<SpeakingSection, VoicePreference> = {
+  errorSummaryCard: "female",
+  rootCauseCard: "female",
+  changesCard: "female",
+  preventionCard: "female",
+  whyFixWorksPanel: "female",
+  fullExplanationPanel: "female",
+  alternativesPanel: "female",
+  preventionTabPanel: "female",
+};
+
+interface VoiceControlProps {
+  speakerId: SpeakingSection;
+  text: string;
+  lang: Language;
+  activeSpeaker: SpeakerId;
+  voicePreferences: Record<SpeakingSection, VoicePreference>;
+  onToggle: (text: string, language: Language, id: SpeakingSection, voice?: VoicePreference) => void;
+  onVoiceChange: (id: SpeakingSection, voice: VoicePreference) => void;
+  compact?: boolean;
+}
+
+function VoiceControl({
+  speakerId,
+  text,
+  lang,
+  activeSpeaker,
+  voicePreferences,
+  onToggle,
+  onVoiceChange,
+  compact = false,
+}: VoiceControlProps) {
+  const currentVoice = voicePreferences[speakerId];
+  const isActive = activeSpeaker === speakerId;
+
+  return (
+    <div className="flex items-center gap-1">
+      <Button
+        type="button"
+        variant={compact ? "ghost" : "outline"}
+        size={compact ? "icon" : "sm"}
+        className={
+          compact
+            ? `h-7 w-7 transition-colors ${isActive ? "text-primary" : "text-muted-foreground hover:text-primary"}`
+            : `h-8 gap-2 border-primary/20 ${isActive ? "bg-primary/10 text-primary" : "bg-background"}`
+        }
+        onClick={() => onToggle(text, lang, speakerId)}
+        disabled={!text}
+      >
+        {isActive ? (
+          <>
+            <Square className={`${compact ? "h-3 w-3" : "h-3.5 w-3.5"} fill-current`} />
+            {!compact && <span>Stop</span>}
+          </>
+        ) : (
+          <>
+            <Volume2 className={compact ? "h-3.5 w-3.5" : "h-3.5 w-3.5"} />
+            {!compact && <span>Listen</span>}
+          </>
+        )}
+      </Button>
+
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant={compact ? "ghost" : "outline"}
+            size={compact ? "icon" : "sm"}
+            className={
+              compact
+                ? "h-7 w-7 text-muted-foreground hover:text-primary"
+                : "h-8 border-primary/20 bg-background px-2"
+            }
+            disabled={!text}
+          >
+            {!compact && (
+              <span className="text-[11px] font-bold uppercase tracking-wider">
+                {currentVoice === "female" ? "Woman" : "Man"}
+              </span>
+            )}
+            <ChevronDown className={compact ? "h-3 w-3" : "h-3.5 w-3.5"} />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-40 border-primary/10 bg-background/95 backdrop-blur-md">
+          <DropdownMenuLabel className="text-xs uppercase tracking-[0.22em] text-muted-foreground">
+            Voice
+          </DropdownMenuLabel>
+          <DropdownMenuRadioGroup
+            value={currentVoice}
+            onValueChange={(value) => {
+              const selectedVoice = value as VoicePreference;
+              onVoiceChange(speakerId, selectedVoice);
+              onToggle(text, lang, speakerId, selectedVoice);
+            }}
+          >
+            <DropdownMenuRadioItem value="female">Woman</DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="male">Man</DropdownMenuRadioItem>
+          </DropdownMenuRadioGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
 interface SectionCardProps {
   title: string;
   items: string[];
@@ -207,9 +327,16 @@ interface SectionCardProps {
   accentClass: string;
   accentBgClass: string;
   icon: typeof AlertTriangle;
-  speakerId: SpeakerId;
+  speakerId: SpeakingSection;
   activeSpeaker: SpeakerId;
-  onSpeak: (text: string, language: Language, id: SpeakerId) => void;
+  voicePreferences: Record<SpeakingSection, VoicePreference>;
+  onSpeak: (
+    text: string,
+    language: Language,
+    id: SpeakingSection,
+    voice?: VoicePreference,
+  ) => void;
+  onVoiceChange: (id: SpeakingSection, voice: VoicePreference) => void;
   status: Status;
 }
 
@@ -223,7 +350,9 @@ function SectionCard({
   icon: Icon,
   speakerId,
   activeSpeaker,
+  voicePreferences,
   onSpeak,
+  onVoiceChange,
   status,
 }: SectionCardProps) {
   return (
@@ -233,19 +362,21 @@ function SectionCard({
           <div className={`flex h-7 w-7 items-center justify-center rounded-md ${accentBgClass}`}>
             <Icon className={`h-3.5 w-3.5 ${accentClass}`} />
           </div>
-          <CardTitle className={`text-sm font-semibold ${lang === "kh" ? "font-khmer" : ""}`}>
+          <CardTitle className={`text-sm font-semibold ${lang === "kh" ? "font-khmer text-base leading-7" : ""}`}>
             {title}
           </CardTitle>
         </div>
         {status === "success" && textToSpeak && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className={`h-6 w-6 transition-colors ${activeSpeaker === speakerId ? "text-primary" : "text-muted-foreground hover:text-primary"}`}
-            onClick={() => onSpeak(textToSpeak, lang, speakerId)}
-          >
-            {activeSpeaker === speakerId ? <Square className="h-3 w-3 fill-current" /> : <Volume2 className="h-3.5 w-3.5" />}
-          </Button>
+          <VoiceControl
+            speakerId={speakerId}
+            text={textToSpeak}
+            lang={lang}
+            activeSpeaker={activeSpeaker}
+            voicePreferences={voicePreferences}
+            onToggle={onSpeak}
+            onVoiceChange={onVoiceChange}
+            compact
+          />
         )}
       </CardHeader>
       <CardContent>
@@ -258,7 +389,7 @@ function SectionCard({
           <ul className="space-y-1.5">
             {items.length > 0 ? (
               items.map((item, index) => (
-                <li key={`${speakerId}-${index}`} className={`text-sm text-muted-foreground flex gap-2 ${lang === "kh" ? "font-khmer" : ""}`}>
+                <li key={`${speakerId}-${index}`} className={`text-sm text-muted-foreground flex gap-2 ${lang === "kh" ? "font-khmer text-base leading-7" : ""}`}>
                   <span className={`shrink-0 mt-1.5 h-1 w-1 rounded-full ${accentClass.replace("text-", "bg-")}`} />
                   {item}
                 </li>
@@ -282,7 +413,8 @@ interface Props {
 
 export default function ExplanationCards({ status, explanation }: Props) {
   const [lang, setLang] = useState<Language>("en");
-  const [voicePreference, setVoicePreference] = useState<VoicePreference>("female");
+  const [voicePreferences, setVoicePreferences] =
+    useState<Record<SpeakingSection, VoicePreference>>(DEFAULT_VOICE_PREFERENCES);
   const [activeSpeaker, setActiveSpeaker] = useState<SpeakerId>(null);
   const { toast } = useToast();
   const isManualSpeechStop = useRef(false);
@@ -299,7 +431,19 @@ export default function ExplanationCards({ status, explanation }: Props) {
     };
   }, []);
 
-  const handleSpeak = (text: string, language: Language, id: SpeakerId) => {
+  const handleVoiceChange = (id: SpeakingSection, voice: VoicePreference) => {
+    setVoicePreferences((prev) => ({
+      ...prev,
+      [id]: voice,
+    }));
+  };
+
+  const handleSpeak = (
+    text: string,
+    language: Language,
+    id: SpeakingSection,
+    voice = voicePreferences[id],
+  ) => {
     if (!text) return;
 
     if (!("speechSynthesis" in window)) {
@@ -337,7 +481,7 @@ export default function ExplanationCards({ status, explanation }: Props) {
           voice.lang.toLowerCase().startsWith("km") ||
           voice.name.toLowerCase().includes("khmer") ||
           voice.lang.toLowerCase().includes("kh"),
-        voicePreference,
+        voice,
       );
 
       if (!khmerVoice) {
@@ -356,7 +500,7 @@ export default function ExplanationCards({ status, explanation }: Props) {
       const englishVoice = pickPreferredVoice(
         voices,
         (voice) => voice.lang.includes("en-US") || voice.lang.includes("en-GB"),
-        voicePreference,
+        voice,
       );
       if (englishVoice) utterance.voice = englishVoice;
     }
@@ -364,6 +508,7 @@ export default function ExplanationCards({ status, explanation }: Props) {
     utterance.rate = 0.85;
     utterance.onstart = () => {
       isManualSpeechStop.current = false;
+      handleVoiceChange(id, voice);
       setActiveSpeaker(id);
     };
     utterance.onend = () => {
@@ -442,56 +587,31 @@ export default function ExplanationCards({ status, explanation }: Props) {
   const confidence = parsed ? (lang === "en" ? parsed.confidenceEn : parsed.confidenceKh) : "";
   const whyItWorks = parsed ? (lang === "en" ? parsed.whyItWorksEn : parsed.whyItWorksKh) : "";
   const alternatives = parsed ? (lang === "en" ? parsed.alternativesEn : parsed.alternativesKh) : [];
+  const prevention = parsed ? (lang === "en" ? parsed.preventionEn : parsed.preventionKh) : [];
   const explanationText = parsed ? (lang === "en" ? parsed.explanationEn : parsed.explanationKh) : "";
-  const khmerHeaderFont = lang === "kh" ? "font-khmer" : "";
+  const khmerTextClass = lang === "kh" ? "font-khmer text-base leading-7" : "";
+  const bugCount = parsed
+    ? parsed.bugTypeEn.includes("no-bug-found")
+      ? 0
+      : Math.max(parsed.errorSummaryEn.length, parsed.bugTypeEn.length, 1)
+    : 0;
+  const fixCount = parsed ? parsed.changesEn.length : 0;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between px-1 gap-4 flex-wrap">
+    <div className="space-y-5">
+      <div className="flex items-center justify-between gap-4 px-1 flex-wrap">
         <div className="flex items-center gap-2 text-muted-foreground">
-          <Languages className="h-4 w-4" />
-          <span className="text-sm font-medium uppercase tracking-wider">Debug Analysis</span>
+          <Languages className="h-4 w-4 text-primary" />
+          <span className={`text-sm font-semibold tracking-[0.24em] ${lang === "kh" ? khmerTextClass : "uppercase"}`}>
+            {lang === "en" ? "Debug Insights" : "ការវិភាគកូដ"}
+          </span>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          {status === "success" && bugType.length > 0 && (
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className={`text-[11px] tracking-wider text-muted-foreground ${khmerHeaderFont} ${lang === "en" ? "uppercase" : ""}`}>
-                {lang === "en" ? "Bug Type" : "ប្រភេទបញ្ហា"}
-              </span>
-              {bugType.map((item, index) => (
-                <Badge
-                  key={`${item}-${index}`}
-                  variant="outline"
-                  className={`border-primary/20 bg-secondary/40 ${khmerHeaderFont}`}
-                >
-                  {item}
-                </Badge>
-              ))}
-            </div>
-          )}
           {status === "success" && confidence && (
-            <Badge className={`bg-primary/10 text-primary border border-primary/20 hover:bg-primary/10 ${khmerHeaderFont}`}>
+            <Badge className={`border border-primary/20 bg-primary/10 text-primary ${khmerTextClass}`}>
               {(lang === "en" ? "Confidence: " : "កម្រិតទំនុកចិត្ត: ") + confidence.replace(/^[-*•]\s*/, "")}
             </Badge>
           )}
-          <div className="flex items-center bg-secondary/50 p-1 rounded-lg border border-border/50">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setVoicePreference("female")}
-              className={`h-8 px-3 text-xs font-bold rounded-md transition-all ${voicePreference === "female" ? "bg-background text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-            >
-              WOMAN
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setVoicePreference("male")}
-              className={`h-8 px-3 text-xs font-bold rounded-md transition-all ${voicePreference === "male" ? "bg-background text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-            >
-              MAN
-            </Button>
-          </div>
           <div className="flex bg-secondary/50 p-1 rounded-lg border border-border/50">
             <Button
               variant="ghost"
@@ -505,7 +625,7 @@ export default function ExplanationCards({ status, explanation }: Props) {
               variant="ghost"
               size="sm"
               onClick={() => setLang("kh")}
-              className={`h-8 px-4 text-xs font-bold rounded-md transition-all font-khmer ${lang === "kh" ? "bg-background text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+              className={`h-8 px-4 rounded-md transition-all font-khmer text-base leading-7 ${lang === "kh" ? "bg-background text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
             >
               ភាសាខ្មែរ
             </Button>
@@ -513,55 +633,88 @@ export default function ExplanationCards({ status, explanation }: Props) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {cards.map((card) => (
-          <SectionCard
-            key={card.title}
-            title={card.title}
-            items={card.items}
-            textToSpeak={card.textToSpeak}
-            lang={lang}
-            accentClass={card.accentClass}
-            accentBgClass={card.accentBgClass}
-            icon={card.icon}
-            speakerId={card.speakerId}
-            activeSpeaker={activeSpeaker}
-            onSpeak={handleSpeak}
-            status={status}
-          />
-        ))}
-      </div>
+      <Tabs defaultValue="analysis" className="space-y-4">
+        <div className="rounded-2xl border border-primary/10 bg-secondary/10 p-2 shadow-lg shadow-black/10">
+          <TabsList className="grid h-auto w-full grid-cols-2 gap-2 rounded-xl bg-transparent p-0 md:grid-cols-4">
+            <TabsTrigger value="analysis" className="justify-start gap-2 rounded-xl border border-border/50 bg-background/50 px-4 py-3 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+              <Bug className="h-4 w-4" />
+              <span className={khmerTextClass}>{lang === "en" ? "Analysis" : "វិភាគ"}</span>
+            </TabsTrigger>
+            <TabsTrigger value="explanation" className="justify-start gap-2 rounded-xl border border-border/50 bg-background/50 px-4 py-3 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+              <Lightbulb className="h-4 w-4" />
+              <span className={khmerTextClass}>{lang === "en" ? "Explanation" : "ពន្យល់"}</span>
+            </TabsTrigger>
+            <TabsTrigger value="alternatives" className="justify-start gap-2 rounded-xl border border-border/50 bg-background/50 px-4 py-3 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+              <Wrench className="h-4 w-4" />
+              <span className={khmerTextClass}>{lang === "en" ? "Alternatives" : "ជម្រើសផ្សេង"}</span>
+            </TabsTrigger>
+            <TabsTrigger value="summary" className="justify-start gap-2 rounded-xl border border-border/50 bg-background/50 px-4 py-3 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+              <ListChecks className="h-4 w-4" />
+              <span className={khmerTextClass}>{lang === "en" ? "Summary" : "សង្ខេប"}</span>
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
-      {status === "success" && parsed && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <TabsContent value="analysis" className="mt-0">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            {cards.map((card) => (
+              <SectionCard
+                key={card.title}
+                title={card.title}
+                items={card.items}
+                textToSpeak={card.textToSpeak}
+                lang={lang}
+                accentClass={card.accentClass}
+                accentBgClass={card.accentBgClass}
+                icon={card.icon}
+                speakerId={card.speakerId as SpeakingSection}
+                activeSpeaker={activeSpeaker}
+                voicePreferences={voicePreferences}
+                onSpeak={handleSpeak}
+                onVoiceChange={handleVoiceChange}
+                status={status}
+              />
+            ))}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="explanation" className="mt-0 space-y-4">
+          <div className="flex items-center justify-between gap-4 rounded-2xl border border-primary/10 bg-secondary/10 p-4 shadow-lg shadow-black/10">
+            <div>
+              <p className={`text-sm font-semibold ${khmerTextClass}`}>
+                {lang === "en" ? "Language Applied Everywhere" : "ភាសាត្រូវបានអនុវត្តទាំងអស់"}
+              </p>
+              <p className={`text-xs text-muted-foreground ${khmerTextClass}`}>
+                {lang === "en"
+                  ? "The selected language now applies to analysis, alternatives, and summary too."
+                  : "ភាសាដែលបានជ្រើស នឹងអនុវត្តលើផ្ទាំងវិភាគ ជម្រើសផ្សេង និងសង្ខេបផងដែរ។"}
+              </p>
+            </div>
+            <Badge variant="outline" className={`border-primary/20 bg-background/60 ${khmerTextClass}`}>
+              {lang === "en" ? "Current: English" : "បច្ចុប្បន្ន៖ ភាសាខ្មែរ"}
+            </Badge>
+          </div>
+
           <Card className="border-primary/10 bg-secondary/10 overflow-hidden shadow-lg">
             <CardHeader className="pb-3 border-b border-border/50 bg-secondary/20 flex flex-row items-center justify-between space-y-0">
-              <CardTitle className={`text-xs font-bold uppercase tracking-widest text-primary ${lang === "kh" ? "font-khmer" : ""}`}>
+              <CardTitle className={`text-sm font-semibold ${khmerTextClass}`}>
                 {lang === "en" ? "Why This Fix Works" : "ហេតុអ្វីការកែនេះដំណើរការ"}
               </CardTitle>
-              <Button
-                variant="outline"
-                size="sm"
-                className={`h-8 gap-2 border-primary/20 ${activeSpeaker === "whyFixWorksPanel" ? "bg-primary/10 text-primary" : "bg-background"}`}
-                onClick={() => handleSpeak(whyItWorks, lang, "whyFixWorksPanel")}
-                disabled={!whyItWorks}
-              >
-                {activeSpeaker === "whyFixWorksPanel" ? (
-                  <>
-                    <Square className="h-3.5 w-3.5 fill-current" /> Stop
-                  </>
-                ) : (
-                  <>
-                    <Volume2 className="h-3.5 w-3.5" /> Listen
-                  </>
-                )}
-              </Button>
+              <VoiceControl
+                speakerId="whyFixWorksPanel"
+                text={whyItWorks}
+                lang={lang}
+                activeSpeaker={activeSpeaker}
+                voicePreferences={voicePreferences}
+                onToggle={handleSpeak}
+                onVoiceChange={handleVoiceChange}
+              />
             </CardHeader>
             <CardContent className="pt-6">
               <motion.div
                 key={`why-${lang}`}
                 {...fadeIn}
-                className={`text-base leading-relaxed p-4 rounded-lg bg-background/50 border border-primary/5 ${lang === "kh" ? "font-khmer text-lg leading-loose" : "text-foreground/80"}`}
+                className={`text-base leading-relaxed p-4 rounded-lg bg-background/50 border border-primary/5 ${lang === "kh" ? khmerTextClass : "text-foreground/80"}`}
               >
                 {whyItWorks || (lang === "en" ? "No explanation returned." : "មិនមានការពន្យល់ត្រូវបានបង្ហាញទេ។")}
               </motion.div>
@@ -569,68 +722,147 @@ export default function ExplanationCards({ status, explanation }: Props) {
           </Card>
 
           <Card className="border-primary/10 bg-secondary/10 overflow-hidden shadow-lg">
-            <CardHeader className="pb-3 border-b border-border/50 bg-secondary/20">
-              <CardTitle className={`text-xs font-bold uppercase tracking-widest text-primary ${lang === "kh" ? "font-khmer" : ""}`}>
+            <CardHeader className="pb-3 border-b border-border/50 bg-secondary/20 flex flex-row items-center justify-between space-y-0">
+              <CardTitle className={`text-sm font-semibold ${khmerTextClass}`}>
+                {lang === "en" ? "Full Debug Explanation" : "ការពន្យល់លម្អិតអំពីការកែកំហុស"}
+              </CardTitle>
+              <VoiceControl
+                speakerId="fullExplanationPanel"
+                text={explanationText}
+                lang={lang}
+                activeSpeaker={activeSpeaker}
+                voicePreferences={voicePreferences}
+                onToggle={handleSpeak}
+                onVoiceChange={handleVoiceChange}
+              />
+            </CardHeader>
+            <CardContent className="pt-6">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={lang}
+                  {...fadeIn}
+                  className={`text-base leading-relaxed p-4 rounded-lg bg-background/50 border border-primary/5 ${lang === "kh" ? khmerTextClass : "text-foreground/80"}`}
+                >
+                  {explanationText || (lang === "en" ? "No detailed explanation returned." : "មិនមានការពន្យល់លម្អិតត្រូវបានបង្ហាញទេ។")}
+                </motion.div>
+              </AnimatePresence>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="alternatives" className="mt-0 space-y-4">
+          <Card className="border-primary/10 bg-secondary/10 overflow-hidden shadow-lg">
+            <CardHeader className="pb-3 border-b border-border/50 bg-secondary/20 flex flex-row items-center justify-between space-y-0">
+              <CardTitle className={`text-sm font-semibold ${khmerTextClass}`}>
                 {lang === "en" ? "Alternative Fixes" : "វិធីកែផ្សេងទៀត"}
               </CardTitle>
+              <VoiceControl
+                speakerId="alternativesPanel"
+                text={alternatives.join(". ")}
+                lang={lang}
+                activeSpeaker={activeSpeaker}
+                voicePreferences={voicePreferences}
+                onToggle={handleSpeak}
+                onVoiceChange={handleVoiceChange}
+              />
             </CardHeader>
             <CardContent className="pt-6">
               <ul className="space-y-2 p-4 rounded-lg bg-background/50 border border-primary/5">
                 {alternatives.length > 0 ? (
                   alternatives.map((item, index) => (
-                    <li key={`alternative-${index}`} className={`text-sm text-muted-foreground flex gap-2 ${lang === "kh" ? "font-khmer" : ""}`}>
+                    <li
+                      key={`alternative-${index}`}
+                      className={`text-base leading-7 text-muted-foreground flex gap-2 ${lang === "kh" ? khmerTextClass : ""}`}
+                    >
                       <span className="shrink-0 mt-1.5 h-1 w-1 rounded-full bg-primary" />
                       {item}
                     </li>
                   ))
                 ) : (
-                  <li className="text-sm text-muted-foreground/40 italic">
+                  <li className={`text-base text-muted-foreground/40 italic ${lang === "kh" ? khmerTextClass : ""}`}>
                     {lang === "en" ? "No alternative fix returned." : "មិនមានវិធីកែផ្សេងទៀតត្រូវបានបង្ហាញទេ។"}
                   </li>
                 )}
               </ul>
             </CardContent>
           </Card>
-        </div>
-      )}
 
-      {status === "success" && parsed && (
-        <Card className="border-primary/10 bg-secondary/10 overflow-hidden shadow-lg">
-          <CardHeader className="pb-3 border-b border-border/50 bg-secondary/20 flex flex-row items-center justify-between space-y-0">
-            <CardTitle className={`text-xs font-bold uppercase tracking-widest text-primary ${lang === "kh" ? "font-khmer" : ""}`}>
-              {lang === "en" ? "Full Debug Explanation" : "ការពន្យល់លម្អិតអំពីការកែកំហុស"}
-            </CardTitle>
-            <Button
-              variant="outline"
-              size="sm"
-              className={`h-8 gap-2 border-primary/20 ${activeSpeaker === "fullExplanationPanel" ? "bg-primary/10 text-primary" : "bg-background"}`}
-              onClick={() => handleSpeak(explanationText, lang, "fullExplanationPanel")}
-              disabled={!explanationText}
-            >
-              {activeSpeaker === "fullExplanationPanel" ? (
-                <>
-                  <Square className="h-3.5 w-3.5 fill-current" /> Stop
-                </>
-              ) : (
-                <>
-                  <Volume2 className="h-3.5 w-3.5" /> Listen
-                </>
-              )}
-            </Button>
-          </CardHeader>
-          <CardContent className="pt-6">
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={lang}
-                {...fadeIn}
-                className={`text-base leading-relaxed p-4 rounded-lg bg-background/50 border border-primary/5 ${lang === "kh" ? "font-khmer text-lg leading-loose" : "text-foreground/80"}`}
-              >
-                {explanationText || (lang === "en" ? "No detailed explanation returned." : "មិនមានការពន្យល់លម្អិតត្រូវបានបង្ហាញទេ។")}
-              </motion.div>
-            </AnimatePresence>
-          </CardContent>
-        </Card>
-      )}
+          <Card className="border-primary/10 bg-secondary/10 overflow-hidden shadow-lg">
+            <CardHeader className="pb-3 border-b border-border/50 bg-secondary/20 flex flex-row items-center justify-between space-y-0">
+              <CardTitle className={`text-sm font-semibold ${khmerTextClass}`}>
+                {lang === "en" ? "Prevention Tips" : "គន្លឹះការពារ"}
+              </CardTitle>
+              <VoiceControl
+                speakerId="preventionTabPanel"
+                text={prevention.join(". ")}
+                lang={lang}
+                activeSpeaker={activeSpeaker}
+                voicePreferences={voicePreferences}
+                onToggle={handleSpeak}
+                onVoiceChange={handleVoiceChange}
+              />
+            </CardHeader>
+            <CardContent className="pt-6">
+              <ul className="space-y-2 p-4 rounded-lg bg-background/50 border border-primary/5">
+                {prevention.length > 0 ? (
+                  prevention.map((item, index) => (
+                    <li
+                      key={`prevention-${index}`}
+                      className={`text-base leading-7 text-muted-foreground flex gap-2 ${lang === "kh" ? khmerTextClass : ""}`}
+                    >
+                      <span className="shrink-0 mt-1.5 h-1 w-1 rounded-full bg-primary" />
+                      {item}
+                    </li>
+                  ))
+                ) : (
+                  <li className={`text-base text-muted-foreground/40 italic ${lang === "kh" ? khmerTextClass : ""}`}>
+                    {lang === "en" ? "No prevention tips returned." : "មិនមានគន្លឹះការពារត្រូវបានបង្ហាញទេ។"}
+                  </li>
+                )}
+              </ul>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="summary" className="mt-0">
+          <Card className="border-primary/10 bg-secondary/10 overflow-hidden shadow-lg">
+            <CardHeader className="pb-3 border-b border-border/50 bg-secondary/20">
+              <CardTitle className={`text-sm font-semibold ${khmerTextClass}`}>
+                {lang === "en" ? "Debug Summary" : "សេចក្តីសង្ខេបការកែកំហុស"}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-5 pt-6">
+              <div className="flex flex-wrap gap-3">
+                {bugType.map((item, index) => (
+                  <Badge key={`${item}-${index}`} variant="outline" className={`border-primary/20 bg-background/60 ${khmerTextClass}`}>
+                    {item}
+                  </Badge>
+                ))}
+                {confidence && (
+                  <Badge className={`border border-primary/20 bg-primary/10 text-primary ${khmerTextClass}`}>
+                    {(lang === "en" ? "Confidence: " : "កម្រិតទំនុកចិត្ត: ") + confidence.replace(/^[-*•]\s*/, "")}
+                  </Badge>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-4">
+                  <p className={`font-semibold tracking-[0.2em] text-destructive ${lang === "kh" ? khmerTextClass : "text-xs uppercase"}`}>
+                    {lang === "en" ? "Total Bugs Found" : "ចំនួនបញ្ហាសរុប"}
+                  </p>
+                  <p className={`mt-3 text-3xl font-bold ${lang === "kh" ? "font-khmer text-3xl leading-normal" : ""}`}>{bugCount}</p>
+                </div>
+                <div className="rounded-xl border border-success/20 bg-success/5 p-4">
+                  <p className={`font-semibold tracking-[0.2em] text-success ${lang === "kh" ? khmerTextClass : "text-xs uppercase"}`}>
+                    {lang === "en" ? "Total Fixes Applied" : "ចំនួនការកែសរុប"}
+                  </p>
+                  <p className={`mt-3 text-3xl font-bold ${lang === "kh" ? "font-khmer text-3xl leading-normal" : ""}`}>{fixCount}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

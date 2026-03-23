@@ -7,6 +7,8 @@ import ExplanationCards from "@/components/ExplanationCards";
 import Footer from "@/components/Footer";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "next-themes";
+import { jsPDF } from "jspdf";
+import html2canvas from "html2canvas";
 import Particles from "@/components/ui/FloatingAnimation";
 import { History, Trash2, Clock, ChevronRight } from "lucide-react";
 import {
@@ -191,7 +193,15 @@ interface HistoryItem {
   language: string;
   mode: string;
   output: string;
+  commentedOutput: string;
   explanation: string;
+}
+
+interface LastAnalyzedInput {
+  code: string;
+  errorMessage: string;
+  language: string;
+  mode: string;
 }
 
 const extractSection = (text: string, sectionName: string) => {
@@ -246,6 +256,232 @@ const collapseRepeatedOutput = (originalCode: string, fixedCode: string) => {
   return fixedCode;
 };
 
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+function createReportSectionHtml(
+  title: string,
+  body: string,
+  options?: { code?: boolean; khmer?: boolean },
+) {
+  const fontFamily = options?.code
+    ? "'JetBrains Mono', monospace"
+    : options?.khmer
+      ? "'Kantumruy Pro', sans-serif"
+      : "Inter, system-ui, sans-serif";
+
+  return `
+    <section data-pdf-section="true" style="margin-top: 24px; border: 1px solid #e8dcc6; border-radius: 18px; overflow: hidden; background: #fffdfa;">
+      <div style="padding: 14px 18px; background: linear-gradient(90deg, rgba(245,158,11,0.12), rgba(249,115,22,0.08)); border-bottom: 1px solid #f3e6d3;">
+        <h2 style="margin: 0; font: 700 18px/1.35 Inter, system-ui, sans-serif; color: #2b2114;">${escapeHtml(title)}</h2>
+      </div>
+      <div style="padding: 18px;">
+        <pre style="margin: 0; white-space: pre-wrap; word-break: break-word; font: 400 ${options?.code ? "13px/1.7" : "15px/1.9"} ${fontFamily}; color: #18120a;">${escapeHtml(body || "(none)")}</pre>
+      </div>
+    </section>
+  `;
+}
+
+function createReportHeaderHtml(config: {
+  generatedAt: string;
+  languageLabel: string;
+  mode: string;
+}) {
+  return `
+    <header data-pdf-section="true" style="padding: 24px 28px; border-radius: 24px; background: linear-gradient(135deg, #fff7ed, #fffbeb); border: 1px solid #f3d7a2; box-shadow: 0 10px 35px rgba(32, 20, 7, 0.08);">
+      <div style="display: inline-block; padding: 6px 12px; border-radius: 999px; background: rgba(245,158,11,0.14); color: #b45309; font: 700 12px/1 Inter, system-ui, sans-serif; letter-spacing: 0.08em;">AI DEBUGGER REPORT</div>
+      <h1 style="margin: 14px 0 8px; font: 700 32px/1.2 Inter, system-ui, sans-serif; color: #1f160b;">Debug Session Summary</h1>
+      <p style="margin: 0; font: 400 15px/1.7 Inter, system-ui, sans-serif; color: #5a4630;">A clean export of your original code, fix result, and explanation.</p>
+      <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 20px;">
+        <div style="padding: 14px 16px; border-radius: 16px; background: white; border: 1px solid #eedfc9;">
+          <div style="font: 600 11px/1.3 Inter, system-ui, sans-serif; text-transform: uppercase; letter-spacing: 0.08em; color: #8b6b47;">Generated</div>
+          <div style="margin-top: 8px; font: 500 14px/1.6 Inter, system-ui, sans-serif; color: #1f160b;">${escapeHtml(config.generatedAt)}</div>
+        </div>
+        <div style="padding: 14px 16px; border-radius: 16px; background: white; border: 1px solid #eedfc9;">
+          <div style="font: 600 11px/1.3 Inter, system-ui, sans-serif; text-transform: uppercase; letter-spacing: 0.08em; color: #8b6b47;">Language</div>
+          <div style="margin-top: 8px; font: 600 15px/1.6 Inter, system-ui, sans-serif; color: #1f160b;">${escapeHtml(config.languageLabel)}</div>
+        </div>
+        <div style="padding: 14px 16px; border-radius: 16px; background: white; border: 1px solid #eedfc9;">
+          <div style="font: 600 11px/1.3 Inter, system-ui, sans-serif; text-transform: uppercase; letter-spacing: 0.08em; color: #8b6b47;">Mode</div>
+          <div style="margin-top: 8px; font: 600 15px/1.6 Inter, system-ui, sans-serif; color: #1f160b;">${escapeHtml(config.mode)}</div>
+        </div>
+      </div>
+    </header>
+  `;
+}
+
+function cropCanvasSection(sourceCanvas: HTMLCanvasElement, top: number, height: number) {
+  const safeHeight = Math.max(1, Math.min(height, sourceCanvas.height - top));
+  const croppedCanvas = document.createElement("canvas");
+  croppedCanvas.width = sourceCanvas.width;
+  croppedCanvas.height = safeHeight;
+
+  const context = croppedCanvas.getContext("2d");
+  if (!context) {
+    throw new Error("Could not create canvas context for PDF export.");
+  }
+
+  context.fillStyle = "#f7f3eb";
+  context.fillRect(0, 0, croppedCanvas.width, croppedCanvas.height);
+  context.drawImage(
+    sourceCanvas,
+    0,
+    top,
+    sourceCanvas.width,
+    safeHeight,
+    0,
+    0,
+    croppedCanvas.width,
+    safeHeight,
+  );
+
+  return {
+    imageData: croppedCanvas.toDataURL("image/jpeg", 0.72),
+    width: croppedCanvas.width,
+    height: croppedCanvas.height,
+  };
+}
+
+async function capturePdfSections(blocksHtml: string[]) {
+  if ("fonts" in document) {
+    await document.fonts.ready;
+  }
+
+  const wrapper = document.createElement("div");
+  wrapper.setAttribute("aria-hidden", "true");
+  Object.assign(wrapper.style, {
+    position: "fixed",
+    left: "-10000px",
+    top: "0",
+    width: "860px",
+    padding: "0",
+    background: "#f7f3eb",
+    boxSizing: "border-box",
+  });
+
+  wrapper.innerHTML = `<div style="padding: 0; background: #f7f3eb;">${blocksHtml.join("")}</div>`;
+  document.body.appendChild(wrapper);
+
+  try {
+    const sectionNodes = Array.from(
+      wrapper.querySelectorAll<HTMLElement>("[data-pdf-section='true']"),
+    );
+    const canvas = await html2canvas(wrapper, {
+      backgroundColor: null,
+      scale: 1.1,
+      useCORS: true,
+      logging: false,
+    });
+
+    const scaleY = canvas.height / wrapper.offsetHeight;
+
+    return sectionNodes.map((sectionNode) => {
+      const top = Math.max(0, Math.floor(sectionNode.offsetTop * scaleY));
+      const height = Math.max(1, Math.ceil(sectionNode.offsetHeight * scaleY));
+      return cropCanvasSection(canvas, top, height);
+    });
+  } finally {
+    document.body.removeChild(wrapper);
+  }
+}
+
+function addImageBlockToPdf(
+  doc: jsPDF,
+  imageData: string,
+  imagePixelWidth: number,
+  imagePixelHeight: number,
+  startY: number,
+) {
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const marginX = 12;
+  const topMargin = 12;
+  const bottomMargin = 12;
+  const blockGap = 6;
+  const usableWidth = pageWidth - marginX * 2;
+  const usablePageHeight = pageHeight - topMargin - bottomMargin;
+  const imageHeight = (imagePixelHeight * usableWidth) / imagePixelWidth;
+
+  if (imageHeight <= usablePageHeight) {
+    let y = startY;
+    if (y + imageHeight > pageHeight - bottomMargin) {
+      doc.addPage();
+      y = topMargin;
+    }
+    doc.addImage(imageData, "JPEG", marginX, y, usableWidth, imageHeight, undefined, "MEDIUM");
+    return y + imageHeight + blockGap;
+  }
+
+  if (startY > topMargin) {
+    doc.addPage();
+  }
+
+  const totalPages = Math.ceil(imageHeight / usablePageHeight);
+  for (let pageIndex = 0; pageIndex < totalPages; pageIndex += 1) {
+    if (pageIndex > 0) {
+      doc.addPage();
+    }
+    const offsetY = topMargin - pageIndex * usablePageHeight;
+    doc.addImage(imageData, "JPEG", marginX, offsetY, usableWidth, imageHeight, undefined, "MEDIUM");
+  }
+
+  const lastPageHeight =
+    imageHeight - usablePageHeight * (totalPages - 1);
+  return topMargin + lastPageHeight + blockGap;
+}
+
+async function renderReportToPdf(config: {
+  fileName: string;
+  generatedAt: string;
+  languageLabel: string;
+  mode: string;
+  code: string;
+  errorMessage: string;
+  output: string;
+  commentedOutput: string;
+  explanation: string;
+}) {
+  const doc = new jsPDF({
+    orientation: "portrait",
+    unit: "mm",
+    format: "a4",
+  });
+
+  const blocks = [
+    createReportHeaderHtml(config),
+    createReportSectionHtml("Original Code", config.code, { code: true }),
+    createReportSectionHtml("Error Message / Stack Trace", config.errorMessage || "(none)", {
+      code: true,
+    }),
+    createReportSectionHtml("Fixed Code", config.output, { code: true }),
+    ...(config.commentedOutput.trim() && config.commentedOutput !== config.output
+      ? [createReportSectionHtml("Fixed Code With Comments", config.commentedOutput, { code: true })]
+      : []),
+    createReportSectionHtml("Explanation", config.explanation || "(none)", {
+      khmer: /[\u1780-\u17FF]/.test(config.explanation),
+    }),
+  ];
+
+  const capturedSections = await capturePdfSections(blocks);
+  let currentY = 12;
+  for (const block of capturedSections) {
+    currentY = addImageBlockToPdf(
+      doc,
+      block.imageData,
+      block.width,
+      block.height,
+      currentY,
+    );
+  }
+
+  doc.save(config.fileName);
+}
+
 export default function Index() {
   const { toast } = useToast();
   const [code, setCode] = useState("");
@@ -254,10 +490,13 @@ export default function Index() {
   const [mode, setMode] = useState("Debug");
   const [status, setStatus] = useState<Status>("idle");
   const [output, setOutput] = useState("");
+  const [commentedOutput, setCommentedOutput] = useState("");
   const [explanation, setExplanation] = useState("");
   const [copied, setCopied] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [lastAnalyzedInput, setLastAnalyzedInput] =
+    useState<LastAnalyzedInput | null>(null);
 
   // Load history on mount
   useEffect(() => {
@@ -275,6 +514,27 @@ export default function Index() {
   useEffect(() => {
     localStorage.setItem("ai_debugger_history", JSON.stringify(history));
   }, [history]);
+
+  useEffect(() => {
+    if (!lastAnalyzedInput || status === "loading") {
+      return;
+    }
+
+    const hasInputChanged =
+      code !== lastAnalyzedInput.code ||
+      errorMessage !== lastAnalyzedInput.errorMessage ||
+      language !== lastAnalyzedInput.language ||
+      mode !== lastAnalyzedInput.mode;
+
+    if (!hasInputChanged) {
+      return;
+    }
+
+    setOutput("");
+    setCommentedOutput("");
+    setExplanation("");
+    setStatus("idle");
+  }, [code, errorMessage, language, lastAnalyzedInput, mode, status]);
 
   const addToHistory = (item: Omit<HistoryItem, "id" | "timestamp">) => {
     const newItem: HistoryItem = {
@@ -309,8 +569,15 @@ export default function Index() {
     setLanguage(item.language);
     setMode(item.mode);
     setOutput(item.output);
+    setCommentedOutput(item.commentedOutput || item.output);
     setExplanation(item.explanation);
     setStatus("success");
+    setLastAnalyzedInput({
+      code: item.code,
+      errorMessage: item.errorMessage || "",
+      language: item.language,
+      mode: item.mode,
+    });
     setIsHistoryOpen(false);
     toast({
       title: "History Restored",
@@ -380,6 +647,7 @@ export default function Index() {
 
     setStatus("loading");
     setOutput("");
+    setCommentedOutput("");
     setExplanation("");
 
     try {
@@ -401,6 +669,7 @@ export default function Index() {
 
       // --- Safe Parsing Logic ---
       let fixedCode = "AI did not return a valid code block.";
+      let commentedCode = "";
       let explanationPart = result;
       const bugTypes = parseListSection(result, "BUG_TYPE");
       const changesMade = parseListSection(result, "CHANGES_MADE");
@@ -410,8 +679,10 @@ export default function Index() {
 
       if (noBugFound) {
         fixedCode = code;
+        commentedCode = code;
       } else {
         const fixedCodeSection = extractSection(result, "FIXED_CODE");
+        const commentedCodeSection = extractSection(result, "COMMENTED_CODE");
         if (fixedCodeSection.length > 0) {
           fixedCode = fixedCodeSection;
         } else {
@@ -427,13 +698,25 @@ export default function Index() {
               .trim();
           }
         }
+
+        commentedCode = commentedCodeSection.length > 0
+          ? commentedCodeSection
+          : fixedCode;
       }
 
       fixedCode = collapseRepeatedOutput(code, fixedCode);
+      commentedCode = collapseRepeatedOutput(fixedCode, commentedCode);
 
       setOutput(fixedCode);
+      setCommentedOutput(commentedCode);
       setExplanation(explanationPart);
       setStatus("success");
+      setLastAnalyzedInput({
+        code,
+        errorMessage,
+        language,
+        mode,
+      });
 
       // Save to history
       addToHistory({
@@ -442,6 +725,7 @@ export default function Index() {
         language,
         mode,
         output: fixedCode,
+        commentedOutput: commentedCode,
         explanation: explanationPart,
       });
 
@@ -461,25 +745,50 @@ export default function Index() {
     }
   };
 
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(output);
+  const handleCopy = async (includeComments = false) => {
+    const codeToCopy =
+      includeComments && commentedOutput.trim() ? commentedOutput : output;
+    await navigator.clipboard.writeText(codeToCopy);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
 
-  const handleCopyFull = async () => {
-    const fullReview = `${output}\n\nExplanation:\n${explanation}`;
-    await navigator.clipboard.writeText(fullReview);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+  const handleDownload = async () => {
+    const timestamp = new Date();
+    const safeLanguage = (LANG_LABELS[language] || language)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "");
+    const fileName = `ai-debugger-report-${safeLanguage || "code"}-${timestamp
+      .toISOString()
+      .replace(/[:.]/g, "-")}.pdf`;
+
+    await renderReportToPdf({
+      fileName,
+      generatedAt: timestamp.toLocaleString(),
+      languageLabel: LANG_LABELS[language] || language,
+      mode,
+      code: code || "(none)",
+      errorMessage: errorMessage.trim() || "(none)",
+      output: output || "(none)",
+      commentedOutput,
+      explanation: explanation || "(none)",
+    });
+
+    toast({
+      title: "Report Downloaded",
+      description: "Your debug report has been saved as a PDF file.",
+    });
   };
 
   const handleReset = () => {
     setCode("");
     setErrorMessage("");
     setOutput("");
+    setCommentedOutput("");
     setExplanation("");
     setStatus("idle");
+    setLastAnalyzedInput(null);
   };
 
   const { theme } = useTheme();
@@ -598,7 +907,7 @@ export default function Index() {
 
         <main className="flex-1 px-6 pb-12 pt-24">
           <div className="mx-auto max-w-7xl space-y-6">
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
               <CodeInputPanel
                 code={code}
                 setCode={setCode}
@@ -608,15 +917,17 @@ export default function Index() {
                 setLanguage={setLanguage}
                 loading={status === "loading"}
                 onAnalyze={handleAnalyze}
+                onClearCode={handleReset}
               />
               <CodeOutputPanel
                 status={status}
                 output={output}
+                commentedOutput={commentedOutput}
                 originalCode={code}
                 langLabel={LANG_LABELS[language] || language}
                 copied={copied}
                 onCopy={handleCopy}
-                onCopyFull={handleCopyFull}
+                onDownload={handleDownload}
                 onReset={handleReset}
               />
             </div>

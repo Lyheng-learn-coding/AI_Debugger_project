@@ -1,15 +1,15 @@
-import { CheckCircle, Code, Copy, RotateCcw, Maximize2, Split } from "lucide-react";
-import { CSSProperties, useState, useMemo } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { CheckCircle, Code, Copy, Download, RotateCcw, Maximize2, Split, Sparkles } from "lucide-react";
+import { CSSProperties, useState, useMemo, useEffect } from "react";
+import { motion } from "framer-motion";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { oneLight, vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { refractor } from "refractor";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useTheme } from "next-themes";
 import { Card, CardHeader, CardContent, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import {
@@ -32,11 +32,12 @@ type Status = "idle" | "loading" | "success" | "error";
 interface Props {
   status: Status;
   output: string;
+  commentedOutput: string;
   originalCode: string;
   langLabel: string;
   copied: boolean;
-  onCopy: () => void;
-  onCopyFull: () => void;
+  onCopy: (includeComments?: boolean) => void;
+  onDownload: () => void;
   onReset: () => void;
 }
 
@@ -62,6 +63,20 @@ interface StyledTextSegment {
   style?: CSSProperties;
 }
 
+const CODE_TEXT_STYLE: CSSProperties = {
+  fontFamily: "'JetBrains Mono', monospace",
+  fontSize: "14px",
+  lineHeight: "22px",
+  fontWeight: 400,
+};
+
+const LOADING_STEPS = [
+  "Scanning code structure...",
+  "Finding syntax and logic issues...",
+  "Generating the safest fix...",
+  "Preparing explanation and output...",
+];
+
 const LANGUAGE_ALIASES: Record<string, string> = {
   javascript: "javascript",
   typescript: "typescript",
@@ -82,6 +97,10 @@ const LANGUAGE_ALIASES: Record<string, string> = {
   css: "css",
 };
 
+function normalizeLineEndings(value: string) {
+  return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
 function resolveLanguage(language: string) {
   return LANGUAGE_ALIASES[language.toLowerCase()] ?? language.toLowerCase();
 }
@@ -92,14 +111,21 @@ function extractNodeText(node: any): string {
   return node.children.map(extractNodeText).join("");
 }
 
-function getTokenStyle(classNames: string[] = []): CSSProperties | undefined {
+function extractLineText(segments: StyledTextSegment[]): string {
+  return segments.map((segment) => segment.value).join("");
+}
+
+function getTokenStyle(
+  classNames: string[] = [],
+  syntaxTheme: Record<string, CSSProperties>,
+): CSSProperties | undefined {
   const tokens = classNames.filter((className) => className !== "token");
   const styles = tokens
     .flatMap((token) => [
-      vscDarkPlus[token as keyof typeof vscDarkPlus],
-      vscDarkPlus[`.${token}` as keyof typeof vscDarkPlus],
-      vscDarkPlus[tokens.join(".") as keyof typeof vscDarkPlus],
-      vscDarkPlus[`.${tokens.join(".")}` as keyof typeof vscDarkPlus],
+      syntaxTheme[token as keyof typeof syntaxTheme],
+      syntaxTheme[`.${token}` as keyof typeof syntaxTheme],
+      syntaxTheme[tokens.join(".") as keyof typeof syntaxTheme],
+      syntaxTheme[`.${tokens.join(".")}` as keyof typeof syntaxTheme],
     ])
     .filter(Boolean);
 
@@ -124,7 +150,11 @@ function pushStyledSegment(segments: StyledTextSegment[], value: string, style?:
   segments.push({ value, style });
 }
 
-function flattenHighlightNodes(nodes: any[], inheritedStyle?: CSSProperties): StyledTextSegment[] {
+function flattenHighlightNodes(
+  nodes: any[],
+  syntaxTheme: Record<string, CSSProperties>,
+  inheritedStyle?: CSSProperties,
+): StyledTextSegment[] {
   const segments: StyledTextSegment[] = [];
 
   nodes.forEach((node) => {
@@ -135,11 +165,11 @@ function flattenHighlightNodes(nodes: any[], inheritedStyle?: CSSProperties): St
 
     const nodeStyle = {
       ...(inheritedStyle ?? {}),
-      ...(getTokenStyle(node.properties?.className) ?? {}),
+      ...(getTokenStyle(node.properties?.className, syntaxTheme) ?? {}),
     };
 
     if (node.children?.length) {
-      flattenHighlightNodes(node.children, nodeStyle).forEach((segment) => {
+      flattenHighlightNodes(node.children, syntaxTheme, nodeStyle).forEach((segment) => {
         pushStyledSegment(segments, segment.value, segment.style);
       });
       return;
@@ -151,15 +181,42 @@ function flattenHighlightNodes(nodes: any[], inheritedStyle?: CSSProperties): St
   return segments;
 }
 
-function tokenizeLine(line: string, language: string): StyledTextSegment[] {
-  if (!line) return [{ value: " " }];
+function splitStyledSegmentsByLine(segments: StyledTextSegment[]): StyledTextSegment[][] {
+  const lines: StyledTextSegment[][] = [[]];
+
+  segments.forEach((segment) => {
+    const parts = segment.value.split("\n");
+
+    parts.forEach((part, index) => {
+      if (part) {
+        lines[lines.length - 1].push({
+          value: part,
+          style: segment.style,
+        });
+      }
+
+      if (index < parts.length - 1) {
+        lines.push([]);
+      }
+    });
+  });
+
+  return lines.map((line) => (line.length > 0 ? line : [{ value: " ", style: undefined }]));
+}
+
+function tokenizeCodeByLine(
+  code: string,
+  language: string,
+  syntaxTheme: Record<string, CSSProperties>,
+): StyledTextSegment[][] {
+  if (!code) return [[{ value: " ", style: undefined }]];
 
   try {
-    const tree = refractor.highlight(line, language);
-    const segments = flattenHighlightNodes(tree.children as any[]);
-    return segments.length > 0 ? segments : [{ value: line }];
+    const tree = refractor.highlight(code, language);
+    const segments = flattenHighlightNodes(tree.children as any[], syntaxTheme);
+    return segments.length > 0 ? splitStyledSegmentsByLine(segments) : [[{ value: code }]];
   } catch {
-    return [{ value: line }];
+    return code.split("\n").map((line) => [{ value: line || " ", style: undefined }]);
   }
 }
 
@@ -227,8 +284,8 @@ function computeInlineDiff(oldValue: string, newValue: string) {
 }
 
 function computeDiff(oldStr: string, newStr: string): DiffLine[] {
-  const oldLines = oldStr.split('\n');
-  const newLines = newStr.split('\n');
+  const oldLines = normalizeLineEndings(oldStr).split('\n');
+  const newLines = normalizeLineEndings(newStr).split('\n');
   const diff: DiffLine[] = [];
 
   let start = 0;
@@ -374,6 +431,9 @@ interface FullViewModalProps {
   copied: boolean;
   isDiffMode: boolean;
   setIsDiffMode: (v: boolean) => void;
+  hasCommentedVersion: boolean;
+  showComments: boolean;
+  setShowComments: (v: boolean) => void;
 }
 
 const FullViewModal = ({
@@ -386,15 +446,42 @@ const FullViewModal = ({
   copied,
   isDiffMode,
   setIsDiffMode,
+  hasCommentedVersion,
+  showComments,
+  setShowComments,
 }: FullViewModalProps) => {
+  const toggleContainerClass =
+    "flex min-w-0 items-center gap-2 rounded-full border border-primary/15 bg-background/70 px-3 py-2 shadow-sm shadow-black/10";
+  const toggleLabelClass =
+    "cursor-pointer select-none text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground";
+
   const DiffToggle = () => (
-    <div className="flex items-center space-x-2 bg-secondary/40 px-3 py-1.5 rounded-full border border-border/50">
-      <Split className={`h-3 w-3 ${isDiffMode ? 'text-primary' : 'text-muted-foreground'}`} />
-      <Label className="text-[10px] font-bold uppercase tracking-wider cursor-pointer select-none">Diff View</Label>
+    <div className={toggleContainerClass}>
+      <Split className={`h-4 w-4 ${isDiffMode ? 'text-primary' : 'text-foreground/80'}`} />
+      <Label className={toggleLabelClass}>Diff View</Label>
       <Switch 
         checked={isDiffMode} 
         onCheckedChange={setIsDiffMode}
-        className="data-[state=checked]:bg-primary h-4 w-7"
+        className="h-5 w-9 data-[state=checked]:bg-primary"
+      />
+    </div>
+  );
+
+  const CommentsToggle = () => (
+    <div
+      className={`${toggleContainerClass} ${
+        hasCommentedVersion
+          ? ""
+          : "border-border/40 bg-background/45 opacity-65"
+      }`}
+    >
+      <Code className={`h-4 w-4 ${showComments && hasCommentedVersion ? "text-primary" : "text-foreground/80"}`} />
+      <Label className={toggleLabelClass}>Comments</Label>
+      <Switch
+        checked={showComments}
+        onCheckedChange={setShowComments}
+        className="h-5 w-9 data-[state=checked]:bg-primary"
+        disabled={!hasCommentedVersion}
       />
     </div>
   );
@@ -405,12 +492,12 @@ const FullViewModal = ({
         <DrawerTrigger asChild>{trigger}</DrawerTrigger>
         <DrawerContent className="h-[80svh] bg-code-bg border-t border-primary/20">
           <DrawerHeader className="flex flex-col gap-4 border-b border-white/5 pb-4">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-3">
               <DrawerTitle>Full Code View</DrawerTitle>
               <Button
                 variant="outline"
                 size="sm"
-                className="h-8 w-24 border-border hover:gradient-violet-blue hover:text-primary-foreground shrink-0"
+                className="h-8 min-w-[96px] border-border px-3 hover:gradient-violet-blue hover:text-primary-foreground shrink-0"
                 onClick={onCopy}
               >
                 <Copy className="mr-2 h-3.5 w-3.5" />
@@ -418,7 +505,10 @@ const FullViewModal = ({
               </Button>
             </div>
             <div className="flex justify-center">
-              <DiffToggle />
+              <div className="flex w-full flex-wrap justify-center gap-2">
+                <DiffToggle />
+                {hasCommentedVersion && <CommentsToggle />}
+              </div>
             </div>
           </DrawerHeader>
           <div className="overflow-auto p-4 h-full">{children}</div>
@@ -434,6 +524,7 @@ const FullViewModal = ({
           <div className="flex items-center gap-6">
             <DialogTitle>Full Code View</DialogTitle>
             <DiffToggle />
+            {hasCommentedVersion && <CommentsToggle />}
           </div>
           <Button
             variant="outline"
@@ -456,47 +547,100 @@ const FullViewModal = ({
 export default function CodeOutputPanel({
   status,
   output,
+  commentedOutput,
   originalCode,
   langLabel,
   copied,
   onCopy,
-  onCopyFull,
+  onDownload,
   onReset,
 }: Props) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDiffMode, setIsDiffMode] = useState(false);
+  const [showComments, setShowComments] = useState(false);
+  const [loadingStepIndex, setLoadingStepIndex] = useState(0);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const { resolvedTheme } = useTheme();
   const isMobile = useIsMobile();
-  const hasChanges = originalCode !== output;
   const syntaxLanguage = resolveLanguage(langLabel);
+  const syntaxTheme = resolvedTheme === "light" ? oneLight : vscDarkPlus;
+  const hasCommentedVersion =
+    normalizeLineEndings(commentedOutput).trim().length > 0 &&
+    normalizeLineEndings(commentedOutput) !== normalizeLineEndings(output);
+  const displayedOutput =
+    showComments && hasCommentedVersion ? commentedOutput : output;
+  const hasDisplayedChanges =
+    normalizeLineEndings(originalCode) !== normalizeLineEndings(displayedOutput);
 
   const diffLines = useMemo(() => {
-    if (!isDiffMode || !output || !hasChanges) return [];
-    return buildHighlightedDiffLines(computeDiff(originalCode, output));
-  }, [hasChanges, isDiffMode, originalCode, output]);
+    if (!isDiffMode || !displayedOutput || !hasDisplayedChanges) return [];
+    return buildHighlightedDiffLines(computeDiff(originalCode, displayedOutput));
+  }, [displayedOutput, hasDisplayedChanges, isDiffMode, originalCode]);
+
+  const syntaxLines = useMemo(
+    () => tokenizeCodeByLine(displayedOutput, syntaxLanguage, syntaxTheme),
+    [displayedOutput, syntaxLanguage, syntaxTheme],
+  );
+  const loadingProgress = useMemo(() => {
+    if (status !== "loading") return 0;
+    const elapsed = elapsedMs / 1000;
+    const progress =
+      14 +
+      Math.min(elapsed * 7.5, 30) +
+      Math.min(Math.max(elapsed - 3, 0) * 3.2, 18) +
+      Math.min(Math.max(elapsed - 8, 0) * 1.8, 12);
+
+    return Math.min(progress, 86);
+  }, [elapsedMs, status]);
+
+  useEffect(() => {
+    if (status !== "loading") {
+      setLoadingStepIndex(0);
+      setElapsedSeconds(0);
+      setElapsedMs(0);
+      return;
+    }
+
+    const startedAt = Date.now();
+    const interval = window.setInterval(() => {
+      const elapsed = Date.now() - startedAt;
+      const seconds = Math.floor(elapsed / 1000);
+      setElapsedMs(elapsed);
+      setElapsedSeconds(seconds);
+      setLoadingStepIndex(Math.min(Math.floor(seconds / 2), LOADING_STEPS.length - 1));
+    }, 120);
+
+    return () => window.clearInterval(interval);
+  }, [status]);
 
   const CodeBlock = () => (
     <SyntaxHighlighter
-      language={langLabel.toLowerCase()}
-      style={vscDarkPlus}
+      language={syntaxLanguage}
+      style={syntaxTheme}
       customStyle={{
         background: "transparent",
         margin: 0,
         padding: "1rem",
-        fontSize: "0.875rem",
         height: "100%",
+        ...CODE_TEXT_STYLE,
       }}
       codeTagProps={{
-        style: {
-          fontFamily: "'JetBrains Mono', monospace",
-        },
+        style: CODE_TEXT_STYLE,
       }}
     >
-      {output}
+      {displayedOutput}
     </SyntaxHighlighter>
   );
 
-  const renderSyntaxColoredSegments = (line: HighlightedDiffLine) => {
-    const syntaxSegments = tokenizeLine(line.value, syntaxLanguage);
+  const renderSyntaxColoredSegments = (
+    line: HighlightedDiffLine,
+    lineIndex: number,
+  ) => {
+    const syntaxSegments =
+      syntaxLines[lineIndex] && extractLineText(syntaxLines[lineIndex]) === line.value
+        ? syntaxLines[lineIndex]
+        : [{ value: line.value || " ", style: undefined }];
     const rendered: Array<JSX.Element> = [];
 
     let syntaxIndex = 0;
@@ -522,10 +666,14 @@ export default function CodeOutputPanel({
         rendered.push(
           <span
             key={`${line.value}-${renderedIndex}`}
-            className={segment.type === "added" ? "bg-success/20 rounded-sm" : undefined}
+            className={
+              segment.type === "added" && !line.isEntireLineAdded
+                ? "bg-success/12 shadow-[inset_0_-2px_0_hsl(var(--success)/0.65)]"
+                : undefined
+            }
             style={
               segment.type === "added"
-                ? { ...(currentSyntaxSegment.style ?? {}), color: "hsl(var(--success))" }
+                ? currentSyntaxSegment.style
                 : currentSyntaxSegment.style
             }
           >
@@ -556,100 +704,215 @@ export default function CodeOutputPanel({
   };
 
   const DiffBlock = () => (
-    <div className="font-mono text-xs sm:text-sm leading-6 p-4 overflow-auto h-full bg-code-bg">
+    <div
+      className="min-h-full bg-code-bg p-4"
+      style={CODE_TEXT_STYLE}
+    >
       {diffLines.map((line, idx) => (
         <div
           key={`${idx}-${line.value}`}
           className={`px-3 rounded-sm mb-1 ${
-            line.isEntireLineAdded ? 'bg-success/10' : 'bg-transparent'
+            line.isEntireLineAdded
+              ? 'bg-success/7 border-l-2 border-success/35'
+              : 'bg-transparent'
           }`}
         >
-          <pre className="whitespace-pre-wrap">
-            {renderSyntaxColoredSegments(line)}
+          <pre className="m-0 whitespace-pre" style={CODE_TEXT_STYLE}>
+            {renderSyntaxColoredSegments(line, idx)}
           </pre>
         </div>
       ))}
     </div>
   );
 
+  const LoadingBlock = () => (
+    <div className="min-h-[350px] rounded-lg border border-border bg-code-bg p-4 sm:p-5">
+      <div className="flex h-full flex-col justify-between gap-5">
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-full border border-primary/20 bg-primary/10 text-primary">
+              <Sparkles className="h-4 w-4" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-foreground">AI is analyzing your code</p>
+              <p className="text-xs text-muted-foreground">
+                {elapsedSeconds > 0 ? `Working for ${elapsedSeconds}s` : "This can take a little longer for larger code snippets."}
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <div className="h-2 overflow-hidden rounded-full bg-secondary/55">
+              <motion.div
+                className="relative h-full rounded-full bg-gradient-to-r from-amber-400 via-orange-500 to-amber-300"
+                initial={false}
+                animate={{ width: `${loadingProgress}%` }}
+                transition={{ duration: 0.14, ease: "linear" }}
+              >
+                <motion.div
+                  className="absolute right-0 top-1/2 h-3 w-3 -translate-y-1/2 rounded-full bg-white/75 shadow-[0_0_12px_rgba(255,255,255,0.35)]"
+                  animate={{ scale: [0.9, 1.08, 0.9], opacity: [0.7, 1, 0.7] }}
+                  transition={{ repeat: Infinity, duration: 1.6, ease: "easeInOut" }}
+                />
+              </motion.div>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm text-foreground/90">{LOADING_STEPS[loadingStepIndex]}</p>
+              <Badge className="border-primary/20 bg-primary/10 text-[10px] font-semibold uppercase tracking-[0.14em] text-primary">
+                Step {loadingStepIndex + 1}/{LOADING_STEPS.length}
+              </Badge>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-white/5 bg-black/25 p-4">
+          <div className="space-y-3">
+            {[82, 58, 74, 66, 46].map((width, index) => (
+              <motion.div
+                key={width}
+                className="relative h-5 overflow-hidden rounded-md bg-secondary/35"
+                initial={{ opacity: 0.45 }}
+                animate={{ opacity: [0.35, 0.8, 0.35] }}
+                transition={{
+                  repeat: Infinity,
+                  duration: 1.8,
+                  ease: "easeInOut",
+                  delay: index * 0.16,
+                }}
+                style={{ width: `${width}%` }}
+              >
+                <motion.div
+                  className="absolute inset-y-0 left-0 bg-gradient-to-r from-transparent via-primary/35 to-transparent"
+                  initial={{ x: "-120%" }}
+                  animate={{ x: "160%" }}
+                  transition={{
+                    repeat: Infinity,
+                    duration: 2.1,
+                    ease: "easeInOut",
+                    delay: index * 0.14,
+                  }}
+                  style={{ width: "42%" }}
+                />
+              </motion.div>
+            ))}
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {LOADING_STEPS.map((step, index) => (
+              <div
+                key={step}
+                className={`rounded-full border px-3 py-1 text-[11px] transition-colors ${
+                  index <= loadingStepIndex
+                    ? "border-primary/25 bg-primary/10 text-primary"
+                    : "border-border/60 bg-background/40 text-muted-foreground"
+                }`}
+              >
+                {step.replace("...", "")}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const toggleContainerClass =
+    "flex min-w-0 items-center gap-2 rounded-full border px-3 py-2 shadow-sm shadow-black/10";
+  const toggleLabelClass =
+    "cursor-pointer select-none text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground";
+
   return (
     <Card className="gradient-border-top glow-violet overflow-hidden transition-transform duration-200 hover:-translate-y-0.5">
-      <CardHeader className="flex flex-row items-center justify-between pb-3">
-        <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg gradient-violet-blue">
-            <CheckCircle className="h-4 w-4 text-primary-foreground" />
+      <CardHeader className="space-y-3 pb-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg gradient-violet-blue">
+              <CheckCircle className="h-4 w-4 text-primary-foreground" />
+            </div>
+            <CardTitle className="min-w-0 text-base leading-6">Fixed Code</CardTitle>
           </div>
-          <CardTitle className="text-base">Fixed Code</CardTitle>
-        </div>
-        <div className="flex items-center gap-4">
-          {status === "success" && hasChanges && (
-            <div className="flex items-center space-x-2 bg-secondary/40 px-3 py-1.5 rounded-full border border-border/50">
-              <Split className={`h-3.5 w-3.5 ${isDiffMode ? 'text-primary' : 'text-muted-foreground'}`} />
-              <Label htmlFor="diff-mode" className="text-[10px] font-bold uppercase tracking-wider cursor-pointer select-none">Diff View</Label>
-              <Switch 
-                id="diff-mode" 
-                checked={isDiffMode} 
-                onCheckedChange={setIsDiffMode}
-                className="data-[state=checked]:bg-primary h-4 w-7"
-              />
+          {status === "success" && (
+            <div className="flex shrink-0 items-center gap-2">
+              <FullViewModal
+                isOpen={isModalOpen}
+                onOpenChange={setIsModalOpen}
+                isMobile={isMobile}
+                onCopy={() => onCopy(showComments)}
+                copied={copied}
+                isDiffMode={isDiffMode}
+                setIsDiffMode={setIsDiffMode}
+                hasCommentedVersion={hasCommentedVersion}
+                showComments={showComments}
+                setShowComments={setShowComments}
+                trigger={
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-muted-foreground hover:text-primary transition-colors"
+                    title="Full View"
+                  >
+                    <Maximize2 className="h-3.5 w-3.5" />
+                  </Button>
+                }
+              >
+                <div className="h-full rounded-lg border border-white/5 bg-black/20">
+                  {isDiffMode ? <DiffBlock /> : <CodeBlock />}
+                </div>
+              </FullViewModal>
+              <Badge className="hidden gradient-violet-blue border-0 px-2 text-[10px] font-bold uppercase tracking-tight text-primary-foreground sm:inline-flex">
+                {langLabel}
+              </Badge>
             </div>
           )}
-          <div className="flex items-center gap-2">
-            {status === "success" && (
-              <>
-                <FullViewModal
-                  isOpen={isModalOpen}
-                  onOpenChange={setIsModalOpen}
-                  isMobile={isMobile}
-                  onCopy={onCopy}
-                  copied={copied}
-                  isDiffMode={isDiffMode}
-                  setIsDiffMode={setIsDiffMode}
-                  trigger={
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-muted-foreground hover:text-primary transition-colors"
-                      title="Full View"
-                    >
-                      <Maximize2 className="h-3.5 w-3.5" />
-                    </Button>
-                  }
-                >
-                  <div className="h-full rounded-lg border border-white/5 bg-black/20">
-                    {isDiffMode ? <DiffBlock /> : <CodeBlock />}
-                  </div>
-                </FullViewModal>
-                <Badge className="gradient-violet-blue border-0 text-[10px] text-primary-foreground uppercase font-bold tracking-tight px-2">
-                  {langLabel}
-                </Badge>
-              </>
-            )}
-          </div>
         </div>
+
+        {status === "success" && (
+          <div className="flex flex-wrap items-center gap-2">
+            {hasDisplayedChanges && (
+              <div className={`${toggleContainerClass} border-primary/15 bg-background/70`}>
+                <Split className={`h-4 w-4 shrink-0 ${isDiffMode ? 'text-primary' : 'text-foreground/80'}`} />
+                <Label htmlFor="diff-mode" className={toggleLabelClass}>Diff View</Label>
+                <Switch 
+                  id="diff-mode" 
+                  checked={isDiffMode} 
+                  onCheckedChange={setIsDiffMode}
+                  className="h-5 w-9 shrink-0 data-[state=checked]:bg-primary"
+                />
+              </div>
+            )}
+            <div className={`${toggleContainerClass} ${
+              hasCommentedVersion
+                ? "border-primary/15 bg-background/70"
+                : "border-border/40 bg-background/45 opacity-65"
+            }`}>
+              <Code className={`h-4 w-4 shrink-0 ${showComments ? 'text-primary' : 'text-foreground/80'}`} />
+              <Label htmlFor="comment-mode" className={toggleLabelClass}>Comments</Label>
+              <Switch
+                id="comment-mode"
+                checked={showComments}
+                onCheckedChange={setShowComments}
+                className="h-5 w-9 shrink-0 data-[state=checked]:bg-primary"
+                disabled={!hasCommentedVersion}
+              />
+            </div>
+            <Badge className="gradient-violet-blue border-0 px-2 text-[10px] font-bold uppercase tracking-tight text-primary-foreground sm:hidden">
+              {langLabel}
+            </Badge>
+          </div>
+        )}
       </CardHeader>
       <CardContent className="space-y-3">
         {status === "loading" ? (
-          <div className="min-h-[350px] space-y-3 rounded-lg border border-border bg-code-bg p-4">
-            <Skeleton className="h-4 w-[80%] bg-secondary" />
-            <Skeleton className="h-4 w-[60%] bg-secondary" />
-            <Skeleton className="h-4 w-[90%] bg-secondary" />
-            <Skeleton className="h-4 w-[45%] bg-secondary" />
-          </div>
+          <LoadingBlock />
         ) : status === "success" ? (
           <div className="h-[350px] overflow-auto rounded-lg border border-border bg-code-bg">
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={isDiffMode ? 'diff' : 'code'}
-                initial={{ opacity: 0, y: 5 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -5 }}
-                transition={{ duration: 0.2 }}
-                className="h-full"
-              >
-                {isDiffMode && hasChanges ? <DiffBlock /> : <CodeBlock />}
-              </motion.div>
-            </AnimatePresence>
+            <motion.div
+              initial={false}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.15 }}
+              className="h-full"
+            >
+              {isDiffMode && hasDisplayedChanges ? <DiffBlock /> : <CodeBlock />}
+            </motion.div>
           </div>
         ) : (
           <div className="flex min-h-[350px] flex-col items-center justify-center rounded-lg border border-border bg-code-bg p-4">
@@ -669,19 +932,28 @@ export default function CodeOutputPanel({
             )}
           </div>
         )}
-        <div className="flex gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <Button
             variant="outline"
-            className="flex-1 border-border hover:gradient-violet-blue hover:border-transparent hover:text-primary-foreground transition-all duration-300"
+            className="border-border hover:gradient-violet-blue hover:border-transparent hover:text-primary-foreground transition-all duration-300"
             disabled={status !== "success"}
-            onClick={onCopy}
+            onClick={() => onCopy(showComments)}
           >
-            <Copy className="mr-2 h-4 w-4" /> {copied ? "Copied!" : "Copy Code"}
+            <Copy className="mr-2 h-4 w-4" /> {copied ? "Copied!" : showComments && hasCommentedVersion ? "Copy With Comments" : "Copy Code"}
+          </Button>
+
+          <Button
+            variant="outline"
+            className="border-border hover:gradient-violet-blue hover:border-transparent hover:text-primary-foreground transition-all duration-300"
+            disabled={status !== "success"}
+            onClick={onDownload}
+          >
+            <Download className="mr-2 h-4 w-4" /> Download Report
           </Button>
 
           <Button
             variant="ghost"
-            className="flex-1 hover:bg-destructive/10 hover:text-destructive transition-all duration-300"
+            className="hover:bg-destructive/10 hover:text-destructive transition-all duration-300"
             onClick={onReset}
           >
             <RotateCcw className="mr-2 h-4 w-4" /> Reset

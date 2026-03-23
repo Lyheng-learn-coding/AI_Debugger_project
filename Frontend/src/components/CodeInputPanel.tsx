@@ -1,4 +1,4 @@
-import { Code, Wand2, Loader2, Maximize2 } from "lucide-react";
+import { Code, Wand2, Loader2, Maximize2, Trash2 } from "lucide-react";
 import { useState } from "react";
 import {
   Card,
@@ -22,6 +22,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { useTheme } from "next-themes";
 import { Textarea } from "@/components/ui/textarea";
@@ -128,6 +134,7 @@ interface Props {
   setLanguage: (v: string) => void;
   loading: boolean;
   onAnalyze: () => void;
+  onClearCode: () => void;
 }
 
 interface EditorInstanceProps {
@@ -195,6 +202,7 @@ export default function CodeInputPanel({
   setLanguage,
   loading,
   onAnalyze,
+  onClearCode,
 }: Props) {
   const { theme } = useTheme();
   const [isFullScreen, setIsFullScreen] = useState(false);
@@ -250,9 +258,9 @@ export default function CodeInputPanel({
             {selectedLanguage.hint}
           </p>
 
-          <div className="min-h-[350px] w-full rounded-lg border border-border bg-code-bg overflow-hidden">
+          <div className="min-h-[300px] w-full rounded-lg border border-border bg-code-bg overflow-hidden">
             <EditorInstance
-              height="350px"
+              height="300px"
               language={language}
               value={code}
               theme={theme || "dark"}
@@ -260,42 +268,66 @@ export default function CodeInputPanel({
             />
           </div>
 
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-medium">Error Message or Stack Trace</p>
-                <p className="text-xs text-muted-foreground">
-                  Optional, but helpful for runtime errors and framework issues.
-                </p>
-              </div>
-              <Badge className="bg-secondary text-foreground border-border text-[10px]">
-                Optional
-              </Badge>
-            </div>
-            <Textarea
-              value={errorMessage}
-              onChange={(event) => setErrorMessage(event.target.value)}
-              placeholder="Paste console errors, terminal output, traceback, or stack trace here..."
-              className="min-h-28 resize-y bg-code-bg text-sm leading-6"
-            />
-          </div>
+          <Accordion type="single" collapsible className="rounded-lg border border-border bg-secondary/15 px-4">
+            <AccordionItem value="error-context" className="border-b-0">
+              <AccordionTrigger className="py-3 hover:no-underline">
+                <div className="flex items-center gap-3 text-left">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-full border border-primary/20 bg-primary/10 text-sm font-bold text-primary">
+                    +
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold">Add Error Context</p>
+                    <p className="text-xs text-muted-foreground">
+                      Optional stack trace, runtime error, or console output.
+                    </p>
+                  </div>
+                </div>
+              </AccordionTrigger>
+              <AccordionContent className="space-y-2 pb-4">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-medium">Error Message or Stack Trace</p>
+                  <Badge className="bg-secondary text-foreground border-border text-[10px]">
+                    Optional
+                  </Badge>
+                </div>
+                <Textarea
+                  value={errorMessage}
+                  onChange={(event) => setErrorMessage(event.target.value)}
+                  placeholder="Paste console errors, terminal output, traceback, or stack trace here..."
+                  className="min-h-24 resize-y bg-code-bg text-sm leading-6"
+                />
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
 
-          <Button
-            className="w-full gradient-violet-blue border-0 text-primary-foreground hover:opacity-90"
-            onClick={onAnalyze}
-            disabled={loading || !code.trim()}
-          >
-            {loading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Analyzing your
-                code...
-              </>
-            ) : (
-              <>
-                <Wand2 className="mr-2 h-4 w-4" /> Analyze & Fix
-              </>
-            )}
-          </Button>
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full border-border bg-secondary/30 text-foreground hover:bg-secondary/50 sm:w-auto sm:min-w-[148px]"
+              onClick={onClearCode}
+              disabled={!code.trim() && !errorMessage.trim()}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              Clear Code
+            </Button>
+            <Button
+              className="w-full gradient-violet-blue border-0 text-primary-foreground hover:opacity-90"
+              onClick={onAnalyze}
+              disabled={loading || !code.trim()}
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Analyzing your
+                  code...
+                </>
+              ) : (
+                <>
+                  <Wand2 className="mr-2 h-4 w-4" /> Analyze & Fix
+                </>
+              )}
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
