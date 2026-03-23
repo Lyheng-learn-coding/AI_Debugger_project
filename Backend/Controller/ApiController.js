@@ -193,16 +193,23 @@ EXPLANATION_EN:
 EXPLANATION_KH:
 // same explanation in Khmer script
 
-${errorMessage?.trim()
-  ? `Runtime Error / Stack Trace:
+${
+  errorMessage?.trim()
+    ? `Runtime Error / Stack Trace:
 ${errorMessage}
 
 `
-  : ""}Code to analyze:
+    : ""
+}Code to analyze:
 ${code}
 `;
 
-const createCacheKey = ({ code, errorMessage = "", language, mode = "Debug" }) =>
+const createCacheKey = ({
+  code,
+  errorMessage = "",
+  language,
+  mode = "Debug",
+}) =>
   crypto
     .createHash("sha1")
     .update(
@@ -243,12 +250,7 @@ const setCachedResponse = (cacheKey, result) => {
 
 const viewResult = async (req, res) => {
   try {
-    const {
-      code,
-      errorMessage = "",
-      language,
-      mode = "Debug",
-    } = req.body;
+    const { code, errorMessage = "", language, mode = "Debug" } = req.body;
 
     if (!code || !language) {
       return res.status(400).json({
@@ -300,21 +302,31 @@ const viewResult = async (req, res) => {
 
     const result = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: [{
-        role: "user",
-        parts: [{
-          text: buildPrompt({
-            code,
-            errorMessage,
-            language,
-            mode,
-          }),
-        }],
-      }],
+      contents: [
+        {
+          role: "user",
+          parts: [
+            {
+              text: buildPrompt({
+                code,
+                errorMessage,
+                language,
+                mode,
+              }),
+            },
+          ],
+        },
+      ],
       config: {
         thinkingLevel: "low",
       },
     });
+
+    if (!result?.text || typeof result.text !== "string") {
+      throw new Error(
+        "The AI did not return a valid result. Please try again.",
+      );
+    }
 
     setCachedResponse(cacheKey, result.text);
 
