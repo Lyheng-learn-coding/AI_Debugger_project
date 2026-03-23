@@ -19,8 +19,11 @@ export default function Header({ currentMode, setMode, onOpenHistory, historyCou
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2">
             <Bug className="h-5 w-5 shrink-0 text-primary" />
-            <span className="truncate text-lg font-bold tracking-tight">
-              CodeFix<span className="text-primary">AI</span>
+            <span className="font-brand truncate text-[1.18rem] font-bold tracking-[-0.03em] text-foreground sm:text-[1.28rem]">
+              <span className="text-foreground">CodeFix</span>
+              <span className="ml-0.5 bg-gradient-to-r from-amber-400 via-orange-400 to-yellow-300 bg-clip-text text-transparent">
+                AI
+              </span>
             </span>
           </div>
 
