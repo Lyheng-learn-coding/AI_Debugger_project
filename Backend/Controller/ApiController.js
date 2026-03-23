@@ -97,6 +97,7 @@ ${buildModeInstruction(mode)}
 Analyze the following ${language} code and return a minimal safe fix plus short explanations.
 
 Rules:
+- The selected language is the source of truth. FIXED_CODE and COMMENTED_CODE must use valid, idiomatic ${language} syntax.
 - Do not rename any functions
 - Do not change the overall logic unless the bug cannot be fixed without doing so
 - Always return valid runnable ${language} code
@@ -113,6 +114,10 @@ Rules:
 - Khmer explanation must be written in proper Khmer script (ភាសាខ្មែរ)
 - Khmer explanation must be natural and easy to understand for beginners
 - If the code has no real bug, say so clearly and return the original code unchanged
+- If the snippet uses syntax from another language but the user's intent is obvious, translate only that mismatched syntax into valid ${language}
+- Treat foreign-language syntax inside the selected language as a real bug, not as acceptable original code
+- Example: in JavaScript, change print("hello") to console.log("hello")
+- Example: in Python, change console.log("hello") to print("hello")
 - If Mode is ELI5, make both English and Khmer explanations extra simple
 - Keep lists short and concrete
 - ERROR_SUMMARY and ROOT_CAUSE: max 1 bullet each
