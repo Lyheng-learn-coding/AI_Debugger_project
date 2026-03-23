@@ -53,6 +53,10 @@ const LANG_LABELS: Record<string, string> = {
   css: "CSS",
 };
 
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL?.trim() ||
+  "https://ai-debugger-project-backend.onrender.com";
+
 const LANGUAGE_PATTERNS: Partial<Record<keyof typeof LANG_LABELS, RegExp[]>> = {
   javascript: [
     /\b(const|let|var)\b/,
@@ -651,7 +655,7 @@ export default function Index() {
     setExplanation("");
 
     try {
-      const response = await fetch("https://ai-debugger-project-backend.onrender.com/api", {
+      const response = await fetch(`${API_BASE_URL}/api`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

@@ -146,7 +146,13 @@ The backend runs on `http://localhost:3000`.
 npm install
 ```
 
-3. Start the frontend:
+3. Create a frontend env file if needed:
+
+```env
+VITE_API_URL=https://ai-debugger-project-backend.onrender.com
+```
+
+4. Start the frontend:
 
 ```bash
 npm run dev
@@ -164,6 +170,7 @@ Recommended Vercel settings:
 - Root Directory: `Frontend`
 - Build Command: `npm run build`
 - Output Directory: `dist`
+- Environment Variable: `VITE_API_URL=https://your-backend-domain`
 
 `Frontend/vercel.json` is included to rewrite routes to `index.html` for React Router.
 
