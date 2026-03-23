@@ -193,6 +193,14 @@ const MALE_VOICE_HINTS = [
   "guy",
 ];
 
+function voiceNameMatchesHints(
+  voice: SpeechSynthesisVoice,
+  hints: string[],
+) {
+  const voiceName = voice.name.toLowerCase();
+  return hints.some((hint) => voiceName.includes(hint));
+}
+
 function pickPreferredVoice(
   voices: SpeechSynthesisVoice[],
   matcher: (voice: SpeechSynthesisVoice) => boolean,
@@ -206,13 +214,22 @@ function pickPreferredVoice(
 
   const preferredHints =
     preference === "female" ? FEMALE_VOICE_HINTS : MALE_VOICE_HINTS;
+  const oppositeHints =
+    preference === "female" ? MALE_VOICE_HINTS : FEMALE_VOICE_HINTS;
 
-  const preferredVoice = matchingVoices.find((voice) => {
-    const voiceName = voice.name.toLowerCase();
-    return preferredHints.some((hint) => voiceName.includes(hint));
-  });
+  const preferredVoice = matchingVoices.find((voice) =>
+    voiceNameMatchesHints(voice, preferredHints),
+  );
 
-  return preferredVoice ?? matchingVoices[0];
+  if (preferredVoice) {
+    return preferredVoice;
+  }
+
+  const neutralVoice = matchingVoices.find(
+    (voice) => !voiceNameMatchesHints(voice, oppositeHints),
+  );
+
+  return neutralVoice ?? matchingVoices[0];
 }
 
 const DEFAULT_VOICE_PREFERENCES: Record<SpeakingSection, VoicePreference> = {
@@ -416,6 +433,7 @@ export default function ExplanationCards({ status, explanation }: Props) {
   const [voicePreferences, setVoicePreferences] =
     useState<Record<SpeakingSection, VoicePreference>>(DEFAULT_VOICE_PREFERENCES);
   const [activeSpeaker, setActiveSpeaker] = useState<SpeakerId>(null);
+  const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
   const { toast } = useToast();
   const isManualSpeechStop = useRef(false);
 
@@ -425,9 +443,24 @@ export default function ExplanationCards({ status, explanation }: Props) {
   );
 
   useEffect(() => {
+    if (!("speechSynthesis" in window)) {
+      return;
+    }
+
+    const loadVoices = () => {
+      const voices = window.speechSynthesis.getVoices();
+      if (voices.length > 0) {
+        setAvailableVoices(voices);
+      }
+    };
+
+    loadVoices();
+    window.speechSynthesis.addEventListener("voiceschanged", loadVoices);
+
     return () => {
       isManualSpeechStop.current = true;
       window.speechSynthesis.cancel();
+      window.speechSynthesis.removeEventListener("voiceschanged", loadVoices);
     };
   }, []);
 
@@ -458,7 +491,10 @@ export default function ExplanationCards({ status, explanation }: Props) {
       return;
     }
 
-    if (activeSpeaker === id) {
+    const isSameSection = activeSpeaker === id;
+    const isSameVoice = voicePreferences[id] === voice;
+
+    if (isSameSection && isSameVoice) {
       isManualSpeechStop.current = true;
       window.speechSynthesis.cancel();
       setActiveSpeaker(null);
@@ -471,7 +507,10 @@ export default function ExplanationCards({ status, explanation }: Props) {
     window.speechSynthesis.cancel();
 
     const utterance = new SpeechSynthesisUtterance(text);
-    const voices = window.speechSynthesis.getVoices();
+    const voices =
+      availableVoices.length > 0
+        ? availableVoices
+        : window.speechSynthesis.getVoices();
 
     if (language === "kh") {
       utterance.lang = "km-KH";

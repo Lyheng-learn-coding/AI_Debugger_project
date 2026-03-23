@@ -738,6 +738,9 @@ export default function Index() {
       }
 
       const data = await response.json();
+      if (!data?.result || typeof data.result !== "string") {
+        throw new Error("The AI did not return a valid result. Please try again.");
+      }
       const result = data.result;
 
       // --- Safe Parsing Logic ---
@@ -812,8 +815,7 @@ export default function Index() {
       toast({
         variant: "destructive",
         title: "Error",
-        description:
-          error.message || "Could not connect to the backend server.",
+        description: error.message || "Could not connect to the backend server.",
       });
     }
   };
