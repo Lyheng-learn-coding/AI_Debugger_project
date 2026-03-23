@@ -225,6 +225,23 @@ const parseListSection = (text: string, sectionName: string) =>
 const normalizeForComparison = (value: string) =>
   value.replace(/\r\n/g, "\n").trim();
 
+const cleanSectionText = (text: string, sectionName: string) =>
+  extractSection(text, sectionName)
+    .split("\n")
+    .map((line) => line.replace(/^[-*•]\s*/, "").replace(/^\/\/\s*/, "").trim())
+    .filter(Boolean)
+    .join("\n");
+
+const formatListSection = (text: string, sectionName: string) => {
+  const items = extractSection(text, sectionName)
+    .split("\n")
+    .map((line) => line.replace(/^[-*•]\s*/, "").trim())
+    .filter(Boolean)
+    .filter((line) => line.toLowerCase() !== "none");
+
+  return items.length > 0 ? items.map((item) => `- ${item}`).join("\n") : "None";
+};
+
 const collapseRepeatedOutput = (originalCode: string, fixedCode: string) => {
   const normalizedOriginal = normalizeForComparison(originalCode);
   const normalizedFixed = normalizeForComparison(fixedCode);
@@ -456,6 +473,56 @@ async function renderReportToPdf(config: {
     format: "a4",
   });
 
+  const explanationBlocks = [
+    {
+      title: "Error Summary",
+      body:
+        cleanSectionText(config.explanation, "ERROR_SUMMARY") ||
+        cleanSectionText(config.explanation, "ERROR_SUMMARY_KH"),
+    },
+    {
+      title: "Root Cause",
+      body:
+        cleanSectionText(config.explanation, "ROOT_CAUSE") ||
+        cleanSectionText(config.explanation, "ROOT_CAUSE_KH"),
+    },
+    {
+      title: "Changes Made",
+      body:
+        formatListSection(config.explanation, "CHANGES_MADE") !== "None"
+          ? formatListSection(config.explanation, "CHANGES_MADE")
+          : formatListSection(config.explanation, "CHANGES_MADE_KH"),
+    },
+    {
+      title: "Why This Fix Works",
+      body:
+        cleanSectionText(config.explanation, "WHY_THIS_FIX_WORKS") ||
+        cleanSectionText(config.explanation, "WHY_THIS_FIX_WORKS_KH"),
+    },
+    {
+      title: "Alternative Fixes",
+      body:
+        formatListSection(config.explanation, "ALTERNATIVE_FIXES") !== "None"
+          ? formatListSection(config.explanation, "ALTERNATIVE_FIXES")
+          : formatListSection(config.explanation, "ALTERNATIVE_FIXES_KH"),
+    },
+    {
+      title: "Prevention Tips",
+      body:
+        formatListSection(config.explanation, "PREVENTION_TIPS") !== "None"
+          ? formatListSection(config.explanation, "PREVENTION_TIPS")
+          : formatListSection(config.explanation, "PREVENTION_TIPS_KH"),
+    },
+    {
+      title: "Full Explanation",
+      body:
+        cleanSectionText(config.explanation, "EXPLANATION_EN") ||
+        cleanSectionText(config.explanation, "EXPLANATION_KH") ||
+        config.explanation ||
+        "(none)",
+    },
+  ].filter((block) => block.body && block.body.trim().length > 0);
+
   const blocks = [
     createReportHeaderHtml(config),
     createReportSectionHtml("Original Code", config.code, { code: true }),
@@ -466,9 +533,11 @@ async function renderReportToPdf(config: {
     ...(config.commentedOutput.trim() && config.commentedOutput !== config.output
       ? [createReportSectionHtml("Fixed Code With Comments", config.commentedOutput, { code: true })]
       : []),
-    createReportSectionHtml("Explanation", config.explanation || "(none)", {
-      khmer: /[\u1780-\u17FF]/.test(config.explanation),
-    }),
+    ...explanationBlocks.map((block) =>
+      createReportSectionHtml(block.title, block.body, {
+        khmer: /[\u1780-\u17FF]/.test(block.body),
+      }),
+    ),
   ];
 
   const capturedSections = await capturePdfSections(blocks);
