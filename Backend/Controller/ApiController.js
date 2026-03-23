@@ -4,6 +4,12 @@ if (!process.env.API_KEY) {
   process.exit(1);
 }
 
+const crypto = require("crypto");
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const RESPONSE_CACHE = new Map();
+const CACHE_TTL_MS = 10 * 60 * 1000;
+const MAX_CACHE_ENTRIES = 50;
+
 const CODE_KEYWORDS = [
   "function",
   "const",
@@ -88,13 +94,7 @@ You are a senior software engineer and debugging specialist.
 Current Mode: ${mode}
 ${buildModeInstruction(mode)}
 
-Analyze the following ${language} code step by step.
-Your job is to help the user understand:
-1. What error or bug exists
-2. Why it happens
-3. How you fixed it
-4. Why the fix works
-5. How to avoid the same bug next time
+Analyze the following ${language} code and return a minimal safe fix plus short explanations.
 
 Rules:
 - Do not rename any functions
@@ -108,17 +108,21 @@ Rules:
 - Always return COMMENTED_CODE as the same fixed code but with short language-appropriate comments explaining the changed or important lines
 - In COMMENTED_CODE, include at least one explanatory comment next to the main fix when the code changed
 - Do not comment every line in COMMENTED_CODE
-- Add only brief comments when they help explain a non-obvious fix outside the fixed code sections
 - Do NOT wrap the fixed code in markdown backticks
 - Do NOT add \`\`\`${language} or \`\`\` anywhere
 - Khmer explanation must be written in proper Khmer script (ភាសាខ្មែរ)
 - Khmer explanation must be natural and easy to understand for beginners
-- If the code has no real bug, say so clearly and return the original code with only minimal safe cleanup
+- If the code has no real bug, say so clearly and return the original code unchanged
 - If Mode is ELI5, make both English and Khmer explanations extra simple
 - Keep lists short and concrete
+- ERROR_SUMMARY and ROOT_CAUSE: max 1 bullet each
+- CHANGES_MADE, ALTERNATIVE_FIXES, PREVENTION_TIPS: max 2 bullets each
+- WHY_THIS_FIX_WORKS and WHY_THIS_FIX_WORKS_KH: max 2 short sentences each
+- EXPLANATION_EN and EXPLANATION_KH: max 4 short sentences each
 - Do not add any section other than the required format
 - If an error message or stack trace is provided, use it as strong debugging evidence
 - Mention the relationship between the code and the provided error when relevant
+- Be concise. Do not add filler.
 
 Return in EXACTLY this format and nothing else:
 
@@ -193,9 +197,47 @@ ${errorMessage}
 ${code}
 `;
 
+const createCacheKey = ({ code, errorMessage = "", language, mode = "Debug" }) =>
+  crypto
+    .createHash("sha1")
+    .update(
+      JSON.stringify({
+        code: code.trim(),
+        errorMessage: errorMessage.trim(),
+        language,
+        mode,
+      }),
+    )
+    .digest("hex");
+
+const getCachedResponse = (cacheKey) => {
+  const cached = RESPONSE_CACHE.get(cacheKey);
+  if (!cached) return null;
+
+  if (Date.now() - cached.timestamp > CACHE_TTL_MS) {
+    RESPONSE_CACHE.delete(cacheKey);
+    return null;
+  }
+
+  return cached.result;
+};
+
+const setCachedResponse = (cacheKey, result) => {
+  if (RESPONSE_CACHE.size >= MAX_CACHE_ENTRIES) {
+    const oldestKey = RESPONSE_CACHE.keys().next().value;
+    if (oldestKey) {
+      RESPONSE_CACHE.delete(oldestKey);
+    }
+  }
+
+  RESPONSE_CACHE.set(cacheKey, {
+    timestamp: Date.now(),
+    result,
+  });
+};
+
 const viewResult = async (req, res) => {
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const {
       code,
       errorMessage = "",
@@ -236,6 +278,21 @@ const viewResult = async (req, res) => {
       });
     }
 
+    const cacheKey = createCacheKey({
+      code,
+      errorMessage,
+      language,
+      mode,
+    });
+    const cachedResult = getCachedResponse(cacheKey);
+
+    if (cachedResult) {
+      return res.json({
+        message: "Gemini response (cached):",
+        result: cachedResult,
+      });
+    }
+
     const result = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: [{
@@ -253,6 +310,8 @@ const viewResult = async (req, res) => {
         thinkingLevel: "low",
       },
     });
+
+    setCachedResponse(cacheKey, result.text);
 
     return res.json({
       message: "Gemini response:",
