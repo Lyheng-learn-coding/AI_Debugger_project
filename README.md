@@ -27,12 +27,13 @@ The project is split into:
 - Inline diff highlighting that focuses on the changed part, not the whole line
 - `Comments` toggle to switch between clean fixed code and commented fixed code
 - Full-screen code modal
-- Copy code, reset, and download PDF report
+- Copy code, reset, clear code, and download PDF report
 
 ### Explanation experience
 - English / Khmer language toggle
 - Analysis, Explanation, Alternatives, and Summary tabs
 - Section-based speech playback
+- Woman / Man voice selection with device-aware voice fallback
 - Khmer-aware UI typography and speech fallback handling
 
 ### Productivity features
@@ -198,6 +199,8 @@ Environment variables:
 - Better mobile responsiveness for Fixed Code controls
 - Stronger light-mode code readability
 - More informative staged loading animation during analysis
+- Clear Code action for starting a new analysis without refreshing
+- Voice selection that respects available system voices
 - Khmer-friendly explanation UI and PDF export support
 
 ## Scripts
