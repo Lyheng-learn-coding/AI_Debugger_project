@@ -209,7 +209,7 @@ function pickPreferredVoice(
   const matchingVoices = voices.filter(matcher);
 
   if (matchingVoices.length === 0) {
-    return null;
+    return { voice: null, matchedPreference: false };
   }
 
   const preferredHints =
@@ -222,14 +222,20 @@ function pickPreferredVoice(
   );
 
   if (preferredVoice) {
-    return preferredVoice;
+    return { voice: preferredVoice, matchedPreference: true };
   }
 
   const neutralVoice = matchingVoices.find(
-    (voice) => !voiceNameMatchesHints(voice, oppositeHints),
+    (voice) =>
+      !voiceNameMatchesHints(voice, preferredHints) &&
+      !voiceNameMatchesHints(voice, oppositeHints),
   );
 
-  return neutralVoice ?? matchingVoices[0];
+  if (neutralVoice) {
+    return { voice: neutralVoice, matchedPreference: false };
+  }
+
+  return { voice: null, matchedPreference: false };
 }
 
 const DEFAULT_VOICE_PREFERENCES: Record<SpeakingSection, VoicePreference> = {
@@ -514,7 +520,7 @@ export default function ExplanationCards({ status, explanation }: Props) {
 
     if (language === "kh") {
       utterance.lang = "km-KH";
-      const khmerVoice = pickPreferredVoice(
+      const khmerVoiceMatch = pickPreferredVoice(
         voices,
         (voice) =>
           voice.lang.toLowerCase().startsWith("km") ||
@@ -523,25 +529,46 @@ export default function ExplanationCards({ status, explanation }: Props) {
         voice,
       );
 
-      if (!khmerVoice) {
+      if (!khmerVoiceMatch.voice) {
         toast({
           variant: "destructive",
-          title: "Khmer speech unavailable",
+          title:
+            voice === "male"
+              ? "Male Khmer voice unavailable"
+              : "Khmer speech unavailable",
           description:
-            "This device does not have a Khmer voice installed, so Khmer text cannot be read aloud here.",
+            voice === "male"
+              ? "This device does not have a Khmer male voice installed, so the app cannot switch to a male Khmer voice here."
+              : "This device does not have a Khmer voice installed, so Khmer text cannot be read aloud here.",
         });
         return;
       }
 
-      utterance.voice = khmerVoice;
+      utterance.voice = khmerVoiceMatch.voice;
     } else {
       utterance.lang = "en-US";
-      const englishVoice = pickPreferredVoice(
+      const englishVoiceMatch = pickPreferredVoice(
         voices,
         (voice) => voice.lang.includes("en-US") || voice.lang.includes("en-GB"),
         voice,
       );
-      if (englishVoice) utterance.voice = englishVoice;
+
+      if (!englishVoiceMatch.voice) {
+        toast({
+          variant: "destructive",
+          title:
+            voice === "male"
+              ? "Male voice unavailable"
+              : "Speech unavailable",
+          description:
+            voice === "male"
+              ? "This device does not have a clear English male voice installed, so the app cannot switch to a male voice here."
+              : "This device does not have a compatible English voice installed for speech playback.",
+        });
+        return;
+      }
+
+      utterance.voice = englishVoiceMatch.voice;
     }
 
     utterance.rate = 0.85;
