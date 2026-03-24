@@ -747,16 +747,19 @@ export default function ExplanationCards({ status, explanation }: Props) {
         <TabsContent value="explanation" className="mt-0 space-y-4">
           <div className="flex items-center justify-between gap-4 rounded-2xl border border-primary/10 bg-secondary/10 p-4 shadow-lg shadow-black/10">
             <div>
-              <p className={`text-sm font-semibold ${khmerTextClass}`}>
+              <p className={`text-sm font-semibold ${lang === "kh" ? "font-khmer text-base leading-7" : ""}`}>
                 {lang === "en" ? "Language Applied Everywhere" : "ភាសាត្រូវបានអនុវត្តទាំងអស់"}
               </p>
-              <p className={`text-xs text-muted-foreground ${khmerTextClass}`}>
+              <p className={`mt-1 text-xs text-muted-foreground sm:text-sm ${lang === "kh" ? "font-khmer text-sm leading-7 sm:text-base" : ""}`}>
                 {lang === "en"
                   ? "The selected language now applies to analysis, alternatives, and summary too."
                   : "ភាសាដែលបានជ្រើស នឹងអនុវត្តលើផ្ទាំងវិភាគ ជម្រើសផ្សេង និងសង្ខេបផងដែរ។"}
               </p>
             </div>
-            <Badge variant="outline" className={`border-primary/20 bg-background/60 ${khmerTextClass}`}>
+            <Badge
+              variant="outline"
+              className={`border-primary/20 bg-background/60 px-3 py-1 text-xs font-semibold sm:text-sm ${lang === "kh" ? "font-khmer text-sm leading-7 sm:text-base" : ""}`}
+            >
               {lang === "en" ? "Current: English" : "បច្ចុប្បន្ន៖ ភាសាខ្មែរ"}
             </Badge>
           </div>
