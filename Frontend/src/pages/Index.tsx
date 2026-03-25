@@ -746,35 +746,38 @@ export default function Index() {
       // --- Safe Parsing Logic ---
       let fixedCode = "AI did not return a valid code block.";
       let commentedCode = "";
-      let explanationPart = result;
+      const explanationPart = result;
       const bugTypes = parseListSection(result, "BUG_TYPE");
       const changesMade = parseListSection(result, "CHANGES_MADE");
-      const noBugFound =
+      const fixedCodeSection = extractSection(result, "FIXED_CODE");
+      const commentedCodeSection = extractSection(result, "COMMENTED_CODE");
+      const noBugFoundSignaled =
         bugTypes.includes("no-bug-found") ||
         (changesMade.length === 1 && changesMade[0] === "none");
 
-      if (noBugFound) {
+      if (fixedCodeSection.length > 0) {
+        fixedCode = fixedCodeSection;
+      } else {
+        // Fallback: parse triple-backtick code block (legacy behavior)
+        const codeBlockStart = result.indexOf("```");
+        const codeBlockEnd = result.lastIndexOf("```");
+
+        if (codeBlockStart !== -1 && codeBlockEnd > codeBlockStart) {
+          const codeBlock = result.substring(codeBlockStart, codeBlockEnd + 3);
+          const firstLineEnd = codeBlock.indexOf("\n");
+          fixedCode = codeBlock
+            .substring(firstLineEnd + 1, codeBlock.length - 3)
+            .trim();
+        }
+      }
+
+      const hasReturnedFixedCode =
+        fixedCode !== "AI did not return a valid code block.";
+
+      if (noBugFoundSignaled && !hasReturnedFixedCode) {
         fixedCode = code;
         commentedCode = code;
       } else {
-        const fixedCodeSection = extractSection(result, "FIXED_CODE");
-        const commentedCodeSection = extractSection(result, "COMMENTED_CODE");
-        if (fixedCodeSection.length > 0) {
-          fixedCode = fixedCodeSection;
-        } else {
-          // Fallback: parse triple-backtick code block (legacy behavior)
-          const codeBlockStart = result.indexOf("```");
-          const codeBlockEnd = result.lastIndexOf("```");
-
-          if (codeBlockStart !== -1 && codeBlockEnd > codeBlockStart) {
-            const codeBlock = result.substring(codeBlockStart, codeBlockEnd + 3);
-            const firstLineEnd = codeBlock.indexOf("\n");
-            fixedCode = codeBlock
-              .substring(firstLineEnd + 1, codeBlock.length - 3)
-              .trim();
-          }
-        }
-
         commentedCode = commentedCodeSection.length > 0
           ? commentedCodeSection
           : fixedCode;

@@ -101,6 +101,30 @@ function normalizeLineEndings(value: string) {
   return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 }
 
+function hasCommentSyntax(value: string, language: string) {
+  const normalized = normalizeLineEndings(value);
+
+  if (!normalized.trim()) {
+    return false;
+  }
+
+  const lowerLanguage = language.toLowerCase();
+
+  if (["python", "ruby"].includes(lowerLanguage)) {
+    return /(^|\s)#/.test(normalized);
+  }
+
+  if (lowerLanguage === "sql") {
+    return /--|\/\*/.test(normalized);
+  }
+
+  if (lowerLanguage === "markup" || lowerLanguage === "html") {
+    return /<!--/.test(normalized);
+  }
+
+  return /\/\/|\/\*/.test(normalized);
+}
+
 function resolveLanguage(language: string) {
   return LANGUAGE_ALIASES[language.toLowerCase()] ?? language.toLowerCase();
 }
@@ -565,9 +589,15 @@ export default function CodeOutputPanel({
   const isMobile = useIsMobile();
   const syntaxLanguage = resolveLanguage(langLabel);
   const syntaxTheme = resolvedTheme === "light" ? oneLight : vscDarkPlus;
+  const normalizedOriginalCode = normalizeLineEndings(originalCode);
+  const normalizedOutput = normalizeLineEndings(output);
+  const normalizedCommentedOutput = normalizeLineEndings(commentedOutput);
+  const hasFixedChanges = normalizedOriginalCode !== normalizedOutput;
   const hasCommentedVersion =
-    normalizeLineEndings(commentedOutput).trim().length > 0 &&
-    normalizeLineEndings(commentedOutput) !== normalizeLineEndings(output);
+    hasFixedChanges &&
+    normalizedCommentedOutput.trim().length > 0 &&
+    normalizedCommentedOutput !== normalizedOutput &&
+    hasCommentSyntax(commentedOutput, syntaxLanguage);
   const displayedOutput =
     showComments && hasCommentedVersion ? commentedOutput : output;
   const hasDisplayedChanges =
@@ -613,6 +643,18 @@ export default function CodeOutputPanel({
 
     return () => window.clearInterval(interval);
   }, [status]);
+
+  useEffect(() => {
+    if (!hasCommentedVersion && showComments) {
+      setShowComments(false);
+    }
+  }, [hasCommentedVersion, showComments]);
+
+  useEffect(() => {
+    if (!hasFixedChanges && isDiffMode) {
+      setIsDiffMode(false);
+    }
+  }, [hasFixedChanges, isDiffMode]);
 
   const CodeBlock = () => (
     <SyntaxHighlighter
@@ -867,33 +909,36 @@ export default function CodeOutputPanel({
 
         {status === "success" && (
           <div className="flex flex-wrap items-center gap-2">
-            {hasDisplayedChanges && (
-              <div className={`${toggleContainerClass} border-primary/15 bg-background/70`}>
-                <Split className={`h-4 w-4 shrink-0 ${isDiffMode ? 'text-primary' : 'text-foreground/80'}`} />
-                <Label htmlFor="diff-mode" className={toggleLabelClass}>Diff View</Label>
-                <Switch 
-                  id="diff-mode" 
-                  checked={isDiffMode} 
-                  onCheckedChange={setIsDiffMode}
-                  className="h-5 w-9 shrink-0 data-[state=checked]:bg-primary"
-                />
+            {hasFixedChanges ? (
+              <>
+                <div className={`${toggleContainerClass} border-primary/15 bg-background/70`}>
+                  <Split className={`h-4 w-4 shrink-0 ${isDiffMode ? 'text-primary' : 'text-foreground/80'}`} />
+                  <Label htmlFor="diff-mode" className={toggleLabelClass}>Diff View</Label>
+                  <Switch 
+                    id="diff-mode" 
+                    checked={isDiffMode} 
+                    onCheckedChange={setIsDiffMode}
+                    className="h-5 w-9 shrink-0 data-[state=checked]:bg-primary"
+                  />
+                </div>
+                {hasCommentedVersion && (
+                  <div className={`${toggleContainerClass} border-primary/15 bg-background/70`}>
+                    <Code className={`h-4 w-4 shrink-0 ${showComments ? 'text-primary' : 'text-foreground/80'}`} />
+                    <Label htmlFor="comment-mode" className={toggleLabelClass}>Comments</Label>
+                    <Switch
+                      id="comment-mode"
+                      checked={showComments}
+                      onCheckedChange={setShowComments}
+                      className="h-5 w-9 shrink-0 data-[state=checked]:bg-primary"
+                    />
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="rounded-full border border-border/50 bg-background/55 px-3 py-2 text-xs text-muted-foreground">
+                No code changes were needed for this result.
               </div>
             )}
-            <div className={`${toggleContainerClass} ${
-              hasCommentedVersion
-                ? "border-primary/15 bg-background/70"
-                : "border-border/40 bg-background/45 opacity-65"
-            }`}>
-              <Code className={`h-4 w-4 shrink-0 ${showComments ? 'text-primary' : 'text-foreground/80'}`} />
-              <Label htmlFor="comment-mode" className={toggleLabelClass}>Comments</Label>
-              <Switch
-                id="comment-mode"
-                checked={showComments}
-                onCheckedChange={setShowComments}
-                className="h-5 w-9 shrink-0 data-[state=checked]:bg-primary"
-                disabled={!hasCommentedVersion}
-              />
-            </div>
             <Badge className="gradient-violet-blue border-0 px-2 text-[10px] font-bold uppercase tracking-tight text-primary-foreground sm:hidden">
               {langLabel}
             </Badge>
