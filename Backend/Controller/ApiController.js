@@ -4,11 +4,7 @@ if (!process.env.API_KEY) {
   process.exit(1);
 }
 
-const crypto = require("crypto");
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-const RESPONSE_CACHE = new Map();
-const CACHE_TTL_MS = 10 * 60 * 1000;
-const MAX_CACHE_ENTRIES = 50;
 
 const CODE_KEYWORDS = [
   "function",
@@ -75,7 +71,7 @@ const CODE_KEYWORDS = [
 
 const buildModeInstruction = (mode) => {
   if (mode === "Refactor") {
-    return "Stay bug-fix first. Fix the real bug, then make only small readability improvements when they directly support the fix.";
+    return "Refactor the code even when there is no real bug. Preserve behavior, but improve readability, structure, modern syntax, professionalism, and code style in a meaningful way.";
   }
 
   if (mode === "ELI5") {
@@ -114,10 +110,19 @@ Rules:
 - Khmer explanation must be written in proper Khmer script (ភាសាខ្មែរ)
 - Khmer explanation must be natural and easy to understand for beginners
 - If the code has no real bug, say so clearly and return the original code unchanged
+- Exception: if Mode is Refactor, do not return the original code unchanged when there is a clear readability, style, or structural improvement you can make without changing behavior
 - If the snippet uses syntax from another language but the user's intent is obvious, translate only that mismatched syntax into valid ${language}
 - Treat foreign-language syntax inside the selected language as a real bug, not as acceptable original code
 - Example: in JavaScript, change print("hello") to console.log("hello")
 - Example: in Python, change console.log("hello") to print("hello")
+- If Mode is Refactor, prefer clearer and more modern constructs when they keep the same behavior
+- In Refactor mode, actively modernize the code to make it look more professional and maintainable
+- In Refactor mode, replace outdated patterns with modern idiomatic ones when safe
+- In Refactor mode, prefer const over let, and let over var, whenever reassignment rules allow it
+- In Refactor mode, fix style issues such as semicolons, spacing, braces, equality operators, repetitive temporary variables, and old loop patterns when there is a cleaner idiomatic alternative
+- In Refactor mode, for array transformation or filtering code, prefer clearer array methods like filter, map, reduce, some, every, or forEach when appropriate
+- In Refactor mode, simplify nested control flow, remove unnecessary mutation where practical, and use clearer expressions without changing behavior
+- In Refactor mode, the output should look like code written by a modern professional developer for the selected language
 - If Mode is ELI5, make both English and Khmer explanations extra simple
 - Keep lists short and concrete
 - ERROR_SUMMARY and ROOT_CAUSE: max 1 bullet each
@@ -204,50 +209,6 @@ ${errorMessage}
 ${code}
 `;
 
-const createCacheKey = ({
-  code,
-  errorMessage = "",
-  language,
-  mode = "Debug",
-}) =>
-  crypto
-    .createHash("sha1")
-    .update(
-      JSON.stringify({
-        code: code.trim(),
-        errorMessage: errorMessage.trim(),
-        language,
-        mode,
-      }),
-    )
-    .digest("hex");
-
-const getCachedResponse = (cacheKey) => {
-  const cached = RESPONSE_CACHE.get(cacheKey);
-  if (!cached) return null;
-
-  if (Date.now() - cached.timestamp > CACHE_TTL_MS) {
-    RESPONSE_CACHE.delete(cacheKey);
-    return null;
-  }
-
-  return cached.result;
-};
-
-const setCachedResponse = (cacheKey, result) => {
-  if (RESPONSE_CACHE.size >= MAX_CACHE_ENTRIES) {
-    const oldestKey = RESPONSE_CACHE.keys().next().value;
-    if (oldestKey) {
-      RESPONSE_CACHE.delete(oldestKey);
-    }
-  }
-
-  RESPONSE_CACHE.set(cacheKey, {
-    timestamp: Date.now(),
-    result,
-  });
-};
-
 const viewResult = async (req, res) => {
   try {
     const { code, errorMessage = "", language, mode = "Debug" } = req.body;
@@ -285,21 +246,6 @@ const viewResult = async (req, res) => {
       });
     }
 
-    const cacheKey = createCacheKey({
-      code,
-      errorMessage,
-      language,
-      mode,
-    });
-    const cachedResult = getCachedResponse(cacheKey);
-
-    if (cachedResult) {
-      return res.json({
-        message: "Gemini response (cached):",
-        result: cachedResult,
-      });
-    }
-
     const result = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: [
@@ -327,8 +273,6 @@ const viewResult = async (req, res) => {
         "The AI did not return a valid result. Please try again.",
       );
     }
-
-    setCachedResponse(cacheKey, result.text);
 
     return res.json({
       message: "Gemini response:",
